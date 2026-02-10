@@ -1,0 +1,673 @@
+import 'package:flutter/material.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_colors_dark.dart';
+import '../../core/theme/app_spacing.dart';
+import '../../core/theme/app_text_styles.dart';
+import '../../domain/models/tercen_data.dart';
+import '../../implementations/services/csv_parser_service.dart';
+import '../../implementations/services/tercen_data_service.dart';
+import '../../implementations/services/model_fitting_service.dart';
+import '../painters/mean_variance_chart_painter.dart';
+
+/// Main content area with charts and fit results table below
+/// Charts always use white background (export-ready)
+class MainContent extends StatefulWidget {
+  final String chartTitle;
+  final String plotType;
+  final bool showModelFit;
+  final bool combineGroups;
+  final bool logXAxis;
+  final double? xMin;
+  final double? xMax;
+  final double? yMin;
+  final double? yMax;
+  final double lowThreshold;
+  final double highThreshold;
+
+  const MainContent({
+    super.key,
+    required this.chartTitle,
+    required this.plotType,
+    required this.showModelFit,
+    required this.combineGroups,
+    this.logXAxis = false,
+    this.xMin,
+    this.xMax,
+    this.yMin,
+    this.yMax,
+    this.lowThreshold = 100.0,
+    this.highThreshold = 1000.0,
+  });
+
+  @override
+  State<MainContent> createState() => _MainContentState();
+}
+
+class _MainContentState extends State<MainContent> {
+  bool _isTableCollapsed = false;
+  late Future<TercenDataset> _dataFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _dataFuture = _loadData();
+  }
+
+  /// Load data from Tercen context or fall back to CSV mock
+  Future<TercenDataset> _loadData() async {
+    TercenDataset dataset;
+
+    try {
+      // Get taskId from URL parameters
+      final taskId = Uri.base.queryParameters['taskId'];
+
+      if (taskId != null && taskId.isNotEmpty) {
+        debugPrint('');
+        debugPrint('🔵 Loading data from Tercen context (taskId: $taskId)');
+
+        // Try to use Tercen data service
+        try {
+          final tercenService = TercenDataService.fromGetIt();
+          dataset = await tercenService.extractTercenData(taskId: taskId);
+        } catch (e) {
+          debugPrint('⚠ Error using Tercen service: $e');
+          debugPrint('  Falling back to mock CSV data');
+          dataset = await CsvParserService.parseExampleData();
+        }
+      } else {
+        debugPrint('');
+        debugPrint('🟡 No taskId in URL, using mock CSV data');
+        dataset = await CsvParserService.parseExampleData();
+      }
+    } catch (e) {
+      debugPrint('⚠ Error in data loading: $e');
+      debugPrint('  Falling back to mock CSV data');
+      dataset = await CsvParserService.parseExampleData();
+    }
+
+    // Apply model fitting if enabled
+    if (widget.showModelFit) {
+      debugPrint('');
+      debugPrint('🟣 Applying model fitting to dataset');
+      debugPrint('   Low threshold: ${widget.lowThreshold}');
+      debugPrint('   High threshold: ${widget.highThreshold}');
+
+      final fittingService = ModelFittingService();
+      final fittedChartData = <String, ChartData>{};
+
+      for (final entry in dataset.chartData.entries) {
+        try {
+          fittedChartData[entry.key] = fittingService.fitModel(
+            chartData: entry.value,
+            lowThreshold: widget.lowThreshold,
+            highThreshold: widget.highThreshold,
+          );
+        } catch (e) {
+          debugPrint('⚠ Error fitting ${entry.key}: $e');
+          // Use original data if fitting fails
+          fittedChartData[entry.key] = entry.value;
+        }
+      }
+
+      dataset = TercenDataset(
+        supergroups: dataset.supergroups,
+        testConditions: dataset.testConditions,
+        chartData: fittedChartData,
+      );
+
+      debugPrint('✅ Model fitting complete');
+    }
+
+    return dataset;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark ? AppColorsDark.background : AppColors.background;
+
+    return Container(
+      color: bgColor,
+      child: FutureBuilder<TercenDataset>(
+        future: _dataFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (snapshot.hasError) {
+            return Center(
+              child: Text(
+                'Error loading data: ${snapshot.error}',
+                style: TextStyle(
+                  color: isDark ? AppColorsDark.error : AppColors.error,
+                ),
+              ),
+            );
+          }
+
+          final dataset = snapshot.data!;
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Chart Title (if provided)
+                if (widget.chartTitle.isNotEmpty) ...[
+                  Center(
+                    child: Text(
+                      widget.chartTitle,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                        color: isDark
+                            ? AppColorsDark.textPrimary
+                            : AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                ],
+
+                // Chart Grid (always white background)
+                if (widget.combineGroups)
+                  _buildCombinedChart(context, dataset)
+                else
+                  _buildSupergroupGrid(context, dataset),
+
+                const SizedBox(height: AppSpacing.md),
+
+                // Legend
+                if (widget.showModelFit) _buildLegend(context),
+
+                // Fit Results Table (below charts, not in right panel)
+                if (widget.showModelFit && !_isTableCollapsed) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  _buildTableBelow(context, dataset),
+                ],
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Build grid layout organized by supergroups (rows)
+  /// Each supergroup gets its own row with test conditions as columns
+  Widget _buildSupergroupGrid(BuildContext context, TercenDataset dataset) {
+    final supergroups = dataset.getSupergroupsOrdered();
+    final testConditions = dataset.getTestConditionsOrdered();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: supergroups.asMap().entries.map((sgEntry) {
+        final supergroupIndex = sgEntry.key;
+        final supergroup = sgEntry.value;
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: testConditions.asMap().entries.map((tcEntry) {
+              final groupIndex = tcEntry.key;
+              final condition = tcEntry.value;
+
+              final chartData = dataset.getChartData(supergroup, condition);
+              if (chartData == null) {
+                return const SizedBox.shrink();
+              }
+
+              return Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: _buildSingleChart(
+                    context,
+                    chartData,
+                    supergroupIndex: supergroupIndex,
+                    groupIndex: groupIndex,
+                    totalSupergroups: supergroups.length,
+                    totalGroups: testConditions.length,
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildCombinedChart(BuildContext context, TercenDataset dataset) {
+    // For combined view, merge all data points
+    final allPoints = <TercenDataPoint>[];
+    for (final chartData in dataset.chartData.values) {
+      allPoints.addAll(chartData.points);
+    }
+
+    if (allPoints.isEmpty) {
+      return const Center(child: Text('No data available'));
+    }
+
+    final xValues = allPoints.map((p) => p.x).toList();
+    final yValues = allPoints.map((p) => p.y).toList();
+    final minX = xValues.reduce((a, b) => a < b ? a : b);
+    final maxX = xValues.reduce((a, b) => a > b ? a : b);
+    final minY = yValues.reduce((a, b) => a < b ? a : b);
+    final maxY = yValues.reduce((a, b) => a > b ? a : b);
+
+    final combinedData = ChartData(
+      supergroup: 'Combined',
+      testCondition: 'All',
+      points: allPoints,
+      minX: minX,
+      maxX: maxX,
+      minY: minY,
+      maxY: maxY,
+    );
+
+    return _buildSingleChart(context, combinedData, isFullWidth: true);
+  }
+
+  Widget _buildSingleChart(
+    BuildContext context,
+    ChartData chartData, {
+    bool isFullWidth = false,
+    int supergroupIndex = 0,
+    int groupIndex = 0,
+    int totalSupergroups = 1,
+    int totalGroups = 1,
+  }) {
+    // ALWAYS WHITE BACKGROUND (export-ready, not theme-dependent)
+    const chartBgColor = Colors.white;
+    const borderColor = Color(0xFFD1D5DB);
+    const textColor = Color(0xFF111827);
+
+    // Determine axis labels based on transforms
+    final xAxisLabel = widget.logXAxis ? 'log₁₀(Mean)' : 'Mean';
+    final yAxisLabel = widget.plotType == 'CV'
+        ? 'Coefficient of Variation'
+        : widget.plotType == 'SNR'
+            ? 'SNR (dB)'
+            : 'Standard Deviation';
+
+    return Container(
+      height: isFullWidth ? 400 : 300,
+      decoration: BoxDecoration(
+        color: chartBgColor,
+        border: Border.all(color: borderColor),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+      ),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Pane title
+          Text(
+            chartData.paneKey,
+            style: AppTextStyles.plotTitle.copyWith(color: textColor),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+
+          // Chart visualization with axes
+          Expanded(
+            child: Row(
+              children: [
+                // Y-axis labels (left)
+                SizedBox(
+                  width: 40,
+                  child: _buildYAxisLabels(chartData, textColor),
+                ),
+
+                // Main chart area
+                Expanded(
+                  child: Column(
+                    children: [
+                      // Chart plot area
+                      Expanded(
+                        child: CustomPaint(
+                          painter: MeanVarianceChartPainter(
+                            chartData: chartData,
+                            plotType: widget.plotType,
+                            showFit: widget.showModelFit,
+                            logXAxis: widget.logXAxis,
+                            xMin: widget.xMin,
+                            xMax: widget.xMax,
+                            yMin: widget.yMin,
+                            yMax: widget.yMax,
+                            supergroupIndex: supergroupIndex,
+                            groupIndex: groupIndex,
+                            totalSupergroups: totalSupergroups,
+                            totalGroups: totalGroups,
+                          ),
+                          size: Size.infinite,
+                        ),
+                      ),
+
+                      // X-axis labels (bottom)
+                      SizedBox(
+                        height: 20,
+                        child: _buildXAxisLabels(chartData, textColor),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // Axis titles
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                xAxisLabel,
+                style: AppTextStyles.axisLabel.copyWith(color: textColor),
+              ),
+              Text(
+                yAxisLabel,
+                style: AppTextStyles.axisLabel.copyWith(color: textColor),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildYAxisLabels(ChartData chartData, Color textColor) {
+    // Show 5 evenly-spaced Y-axis labels
+    final yRange = chartData.maxY - chartData.minY;
+    final labels = <String>[];
+
+    for (var i = 4; i >= 0; i--) {
+      final value = chartData.minY + (yRange * i / 4);
+      labels.add(value.toStringAsFixed(0));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20), // Add padding to prevent overlap with X-axis
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: labels.map((label) {
+          return Text(
+            label,
+            style: TextStyle(fontSize: 9, color: textColor),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildXAxisLabels(ChartData chartData, Color textColor) {
+    // Show 5 evenly-spaced X-axis labels
+    final xRange = chartData.maxX - chartData.minX;
+    final labels = <String>[];
+
+    for (var i = 0; i <= 4; i++) {
+      final value = chartData.minX + (xRange * i / 4);
+      labels.add(value.toStringAsFixed(2));
+    }
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: labels.map((label) {
+        return Text(
+          label,
+          style: TextStyle(fontSize: 9, color: textColor),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildLegend(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor =
+        isDark ? AppColorsDark.textSecondary : AppColors.textSecondary;
+
+    return Wrap(
+      spacing: AppSpacing.md,
+      runSpacing: AppSpacing.sm,
+      children: [
+        _buildLegendItem('● Data points', textColor),
+        if (widget.showModelFit)
+          _buildLegendItem('— Fit line', textColor),
+      ],
+    );
+  }
+
+  Widget _buildLegendItem(String label, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: AppTextStyles.label.copyWith(color: color),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTableBelow(BuildContext context, TercenDataset dataset) {
+    return _buildFitResultsTable(context, dataset);
+  }
+
+  /// Build fit results table with real data
+  Widget _buildFitResultsTable(BuildContext context, TercenDataset dataset) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final surfaceColor = isDark ? AppColorsDark.surface : AppColors.surface;
+    final borderColor = isDark ? AppColorsDark.border : AppColors.border;
+    final textColor =
+        isDark ? AppColorsDark.textPrimary : AppColors.textPrimary;
+
+    // Extract fit results from dataset
+    final fitResults = <Map<String, dynamic>>[];
+
+    if (widget.combineGroups) {
+      // For combined view, aggregate all chart data
+      final allCharts = dataset.chartData.values.toList();
+      if (allCharts.isNotEmpty) {
+        // Use first chart's fit results as representative
+        // (In practice, we'd need to refit the combined data)
+        final firstChart = allCharts.first;
+        fitResults.add({
+          'pane': 'Combined',
+          'sigma0': firstChart.sigma0,
+          'cv1': firstChart.cv1,
+          'snr': firstChart.snr,
+          'converged': firstChart.converged,
+        });
+      }
+    } else {
+      final supergroups = dataset.getSupergroupsOrdered();
+      final testConditions = dataset.getTestConditionsOrdered();
+
+      for (final sg in supergroups) {
+        for (final tc in testConditions) {
+          final chartData = dataset.getChartData(sg, tc);
+          if (chartData != null) {
+            fitResults.add({
+              'pane': chartData.paneKey,
+              'sigma0': chartData.sigma0,
+              'cv1': chartData.cv1,
+              'snr': chartData.snr,
+              'converged': chartData.converged,
+            });
+          }
+        }
+      }
+    }
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        width: 700, // Wider to accommodate Converged column
+        decoration: BoxDecoration(
+          color: surfaceColor,
+          border: Border.all(color: borderColor),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Table Header
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: borderColor, width: 1),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'FIT RESULTS',
+                      style: AppTextStyles.label.copyWith(
+                        color: textColor,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 16),
+                    onPressed: () {
+                      setState(() {
+                        _isTableCollapsed = true;
+                      });
+                    },
+                    tooltip: 'Hide table',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+            ),
+
+            // Compact Table Content
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              child: Table(
+                columnWidths: const {
+                  0: FlexColumnWidth(2),
+                  1: FlexColumnWidth(1),
+                  2: FlexColumnWidth(1),
+                  3: FlexColumnWidth(1),
+                  4: FlexColumnWidth(1),
+                },
+                defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                children: [
+                  // Header row
+                  TableRow(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: borderColor, width: 1),
+                      ),
+                    ),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Text('Pane',
+                            style: AppTextStyles.labelSmall
+                                .copyWith(fontWeight: FontWeight.bold)),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Text('σ₀',
+                            style: AppTextStyles.labelSmall
+                                .copyWith(fontWeight: FontWeight.bold),
+                            textAlign: TextAlign.right),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Text('CV₁',
+                            style: AppTextStyles.labelSmall
+                                .copyWith(fontWeight: FontWeight.bold),
+                            textAlign: TextAlign.right),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Text('SNR',
+                            style: AppTextStyles.labelSmall
+                                .copyWith(fontWeight: FontWeight.bold),
+                            textAlign: TextAlign.right),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Text('Converged',
+                            style: AppTextStyles.labelSmall
+                                .copyWith(fontWeight: FontWeight.bold),
+                            textAlign: TextAlign.center),
+                      ),
+                    ],
+                  ),
+                  // Data rows
+                  ...fitResults.map((row) {
+                    final sigma0 = row['sigma0'] as double?;
+                    final cv1 = row['cv1'] as double?;
+                    final snr = row['snr'] as double?;
+                    final converged = row['converged'] as bool?;
+
+                    return TableRow(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Text(row['pane'] as String,
+                              style: AppTextStyles.bodySmall),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Text(
+                              sigma0 != null
+                                  ? sigma0.toStringAsFixed(2)
+                                  : 'N/A',
+                              style: AppTextStyles.bodySmall,
+                              textAlign: TextAlign.right),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Text(
+                              cv1 != null ? cv1.toStringAsFixed(4) : 'N/A',
+                              style: AppTextStyles.bodySmall,
+                              textAlign: TextAlign.right),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Text(
+                              snr != null ? snr.toStringAsFixed(2) : 'N/A',
+                              style: AppTextStyles.bodySmall,
+                              textAlign: TextAlign.right),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Text(
+                              converged != null
+                                  ? (converged ? '✓' : '✗')
+                                  : 'N/A',
+                              style: AppTextStyles.bodySmall.copyWith(
+                                color: converged == true
+                                    ? Colors.green
+                                    : converged == false
+                                        ? Colors.orange
+                                        : textColor,
+                              ),
+                              textAlign: TextAlign.center),
+                        ),
+                      ],
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

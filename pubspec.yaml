@@ -1,0 +1,41 @@
+name: mean_and_cv_flutter_operator
+description: Mean and CV visualization operator for Tercen platform
+version: 1.0.0+1
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  provider: ^6.1.1
+
+  # Theme persistence
+  shared_preferences: ^2.2.2
+
+  # Dependency injection
+  get_it: ^7.6.0
+
+  # Tercen integration
+  sci_tercen_client:
+    git:
+      url: https://github.com/tercen/sci_tercen_client.git
+      ref: 1.11.0
+      path: sci_tercen_client
+
+  # Export functionality
+  pdf: ^3.10.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - _local/Example files/

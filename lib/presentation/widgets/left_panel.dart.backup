@@ -1,0 +1,687 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_colors_dark.dart';
+import '../../core/theme/app_spacing.dart';
+import '../../core/theme/app_text_styles.dart';
+import '../providers/theme_provider.dart';
+import 'common/labeled_checkbox.dart';
+import 'common/compact_number_field.dart';
+
+/// Left panel following Tercen left-panel.md pattern with volcano improvements
+class LeftPanel extends StatefulWidget {
+  final bool isCollapsed;
+  final double panelWidth;
+  final VoidCallback onToggleCollapse;
+  final ValueChanged<double>? onPanelWidthChanged;
+
+  // DISPLAY section
+  final String chartTitle;
+  final ValueChanged<String> onChartTitleChanged;
+  final String plotType;
+  final ValueChanged<String> onPlotTypeChanged;
+  final bool showModelFit;
+  final ValueChanged<bool> onShowModelFitChanged;
+  final bool combineGroups;
+  final ValueChanged<bool> onCombineGroupsChanged;
+
+  // AXES section (nullable = auto)
+  final bool logXAxis;
+  final ValueChanged<bool> onLogXAxisChanged;
+  final bool xMinAuto;
+  final ValueChanged<bool> onXMinAutoChanged;
+  final double xMin;
+  final ValueChanged<double> onXMinChanged;
+  final bool xMaxAuto;
+  final ValueChanged<bool> onXMaxAutoChanged;
+  final double xMax;
+  final ValueChanged<double> onXMaxChanged;
+  final bool yMinAuto;
+  final ValueChanged<bool> onYMinAutoChanged;
+  final double yMin;
+  final ValueChanged<double> onYMinChanged;
+  final bool yMaxAuto;
+  final ValueChanged<bool> onYMaxAutoChanged;
+  final double yMax;
+  final ValueChanged<double> onYMaxChanged;
+
+  // MODEL FITTING section
+  final double highSignalThreshold;
+  final ValueChanged<double> onHighSignalThresholdChanged;
+  final double lowSignalThreshold;
+  final ValueChanged<double> onLowSignalThresholdChanged;
+
+  const LeftPanel({
+    super.key,
+    required this.isCollapsed,
+    required this.panelWidth,
+    required this.onToggleCollapse,
+    this.onPanelWidthChanged,
+    required this.chartTitle,
+    required this.onChartTitleChanged,
+    required this.plotType,
+    required this.onPlotTypeChanged,
+    required this.showModelFit,
+    required this.onShowModelFitChanged,
+    required this.combineGroups,
+    required this.onCombineGroupsChanged,
+    required this.logXAxis,
+    required this.onLogXAxisChanged,
+    required this.xMinAuto,
+    required this.onXMinAutoChanged,
+    required this.xMin,
+    required this.onXMinChanged,
+    required this.xMaxAuto,
+    required this.onXMaxAutoChanged,
+    required this.xMax,
+    required this.onXMaxChanged,
+    required this.yMinAuto,
+    required this.onYMinAutoChanged,
+    required this.yMin,
+    required this.onYMinChanged,
+    required this.yMaxAuto,
+    required this.onYMaxAutoChanged,
+    required this.yMax,
+    required this.onYMaxChanged,
+    required this.highSignalThreshold,
+    required this.onHighSignalThresholdChanged,
+    required this.lowSignalThreshold,
+    required this.onLowSignalThresholdChanged,
+  });
+
+  @override
+  State<LeftPanel> createState() => _LeftPanelState();
+}
+
+class _LeftPanelState extends State<LeftPanel> {
+  bool _isHoveringResizeHandle = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final panelBg = isDark ? AppColorsDark.panelBackground : AppColors.panelBackground;
+    final borderColor = isDark ? AppColorsDark.border : AppColors.border;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      width: widget.isCollapsed ? AppSpacing.panelCollapsedWidth : widget.panelWidth,
+      decoration: BoxDecoration(
+        color: panelBg,
+        border: Border(
+          right: BorderSide(color: borderColor, width: 1),
+        ),
+      ),
+      child: Stack(
+        children: [
+          Column(
+            children: [
+              _buildHeader(context),
+              Expanded(
+                child: widget.isCollapsed
+                    ? _buildCollapsedView(context)
+                    : _buildExpandedView(context),
+              ),
+              // Footer with expand chevron (only when collapsed)
+              if (widget.isCollapsed) _buildCollapsedFooter(context),
+            ],
+          ),
+          // Drag resize handle (only when expanded)
+          if (!widget.isCollapsed) _buildResizeHandle(context),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader(BuildContext context) {
+    final themeProvider = context.watch<ThemeProvider>();
+    final isDark = themeProvider.isDarkMode;
+    final primary = isDark ? AppColorsDark.primary : AppColors.primary;
+
+    return Container(
+      height: AppSpacing.headerHeight,
+      color: primary,
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+      child: Row(
+        children: [
+          // App Icon
+          const Icon(Icons.show_chart, color: Colors.white, size: 20),
+          if (!widget.isCollapsed) ...[
+            const SizedBox(width: AppSpacing.sm),
+            // App Title
+            const Expanded(
+              child: Text(
+                'Mean & CV',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            // Theme Toggle - FIXED: Show moon in light mode, sun in dark mode
+            IconButton(
+              icon: Icon(
+                isDark ? Icons.wb_sunny : Icons.nightlight_round,
+                color: Colors.white,
+                size: 20,
+              ),
+              onPressed: themeProvider.toggleTheme,
+              tooltip: isDark ? 'Switch to light mode' : 'Switch to dark mode',
+            ),
+            // Collapse Chevron (only when expanded to avoid overflow)
+            IconButton(
+              icon: const Icon(
+                Icons.chevron_left,
+                color: Colors.white,
+                size: 20,
+              ),
+              onPressed: widget.onToggleCollapse,
+              tooltip: 'Collapse panel',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCollapsedView(BuildContext context) {
+    // Simple collapsed view with just icons (clicking expands panel)
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.visibility, size: 20),
+            onPressed: widget.onToggleCollapse,
+            tooltip: 'DISPLAY',
+          ),
+          IconButton(
+            icon: const Icon(Icons.straighten, size: 20),
+            onPressed: widget.onToggleCollapse,
+            tooltip: 'AXES',
+          ),
+          IconButton(
+            icon: const Icon(Icons.show_chart, size: 20),
+            onPressed: widget.onToggleCollapse,
+            tooltip: 'MODEL FITTING',
+          ),
+          IconButton(
+            icon: const Icon(Icons.download, size: 20),
+            onPressed: widget.onToggleCollapse,
+            tooltip: 'EXPORT',
+          ),
+          IconButton(
+            icon: const Icon(Icons.info_outline, size: 20),
+            onPressed: widget.onToggleCollapse,
+            tooltip: 'INFO',
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Collapsed footer with chevron to expand
+  Widget _buildCollapsedFooter(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primary = isDark ? AppColorsDark.primary : AppColors.primary;
+
+    return Container(
+      height: AppSpacing.headerHeight,
+      color: primary,
+      child: Center(
+        child: IconButton(
+          icon: const Icon(
+            Icons.chevron_right,
+            color: Colors.white,
+            size: 24,
+          ),
+          onPressed: widget.onToggleCollapse,
+          tooltip: 'Expand panel',
+        ),
+      ),
+    );
+  }
+
+  /// Drag resize handle on right edge with accent color hover
+  Widget _buildResizeHandle(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accentColor = isDark ? AppColorsDark.accent : AppColors.accent;
+
+    return Positioned(
+      right: 0,
+      top: 0,
+      bottom: 0,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeColumn,
+        onEnter: (_) => setState(() => _isHoveringResizeHandle = true),
+        onExit: (_) => setState(() => _isHoveringResizeHandle = false),
+        child: GestureDetector(
+          onHorizontalDragUpdate: (details) {
+            if (widget.onPanelWidthChanged != null) {
+              final newWidth = widget.panelWidth + details.delta.dx;
+              final clampedWidth = newWidth.clamp(
+                AppSpacing.panelWidth, // 280px minimum
+                AppSpacing.panelMaxWidth, // 400px maximum
+              );
+              widget.onPanelWidthChanged!(clampedWidth);
+            }
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: 4,
+            color: _isHoveringResizeHandle
+                ? accentColor.withOpacity(0.5)
+                : Colors.transparent,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExpandedView(BuildContext context) {
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        _buildDisplaySection(context),
+        _buildAxesSection(context),
+        _buildModelFittingSection(context),
+        _buildExportSection(context),
+        _buildInfoSection(context),
+      ],
+    );
+  }
+
+  Widget _buildDisplaySection(BuildContext context) {
+    return _buildSection(
+      context,
+      icon: Icons.visibility,
+      label: 'DISPLAY',
+      children: [
+        // Chart title input
+        _buildLabel(context, 'Chart title'),
+        const SizedBox(height: 4),
+        SizedBox(
+          height: 28,
+          child: TextField(
+            controller: TextEditingController(text: chartTitle)
+              ..selection = TextSelection.collapsed(offset: chartTitle.length),
+            decoration: const InputDecoration(
+              hintText: 'Enter title (optional)',
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            ),
+            style: const TextStyle(fontSize: 12),
+            onChanged: onChartTitleChanged,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+
+        // Plot type selector
+        _buildLabel(context, 'Plot type'),
+        const SizedBox(height: 4),
+        SegmentedButton<String>(
+          segments: const [
+            ButtonSegment(value: 'CV', label: Text('CV', style: TextStyle(fontSize: 12))),
+            ButtonSegment(value: 'SNR', label: Text('SNR', style: TextStyle(fontSize: 12))),
+            ButtonSegment(value: 'SD', label: Text('SD', style: TextStyle(fontSize: 12))),
+          ],
+          selected: {plotType},
+          onSelectionChanged: (Set<String> newSelection) {
+            onPlotTypeChanged(newSelection.first);
+          },
+          style: ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+
+        // Checkboxes instead of toggle switches
+        LabeledCheckbox(
+          label: 'Show model fit',
+          value: showModelFit,
+          onChanged: onShowModelFitChanged,
+        ),
+        LabeledCheckbox(
+          label: 'Combine all groups',
+          value: combineGroups,
+          onChanged: onCombineGroupsChanged,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAxesSection(BuildContext context) {
+    return _buildSection(
+      context,
+      icon: Icons.straighten,
+      label: 'AXES',
+      children: [
+        // Log x-axis checkbox
+        LabeledCheckbox(
+          label: 'Log x-axis',
+          value: logXAxis,
+          onChanged: onLogXAxisChanged,
+        ),
+        const SizedBox(height: AppSpacing.sm),
+
+        // X-axis limits (volcano pattern - no auto checkbox)
+        _buildSubLabel(context, 'X-AXIS LIMITS'),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            SizedBox(
+              width: 36,
+              child: _buildLabel(context, 'Min'),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: CompactNumberField(
+                value: xMinAuto ? null : xMin,
+                hint: 'auto',
+                onChanged: (val) {
+                  if (val == null) {
+                    onXMinAutoChanged(true);
+                  } else {
+                    onXMinAutoChanged(false);
+                    onXMinChanged(val);
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: 4),
+            SizedBox(
+              width: 36,
+              child: _buildLabel(context, 'Max'),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: CompactNumberField(
+                value: xMaxAuto ? null : xMax,
+                hint: 'auto',
+                onChanged: (val) {
+                  if (val == null) {
+                    onXMaxAutoChanged(true);
+                  } else {
+                    onXMaxAutoChanged(false);
+                    onXMaxChanged(val);
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.sm),
+
+        // Y-axis limits
+        _buildSubLabel(context, 'Y-AXIS LIMITS'),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            SizedBox(
+              width: 36,
+              child: _buildLabel(context, 'Min'),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: CompactNumberField(
+                value: yMinAuto ? null : yMin,
+                hint: 'auto',
+                onChanged: (val) {
+                  if (val == null) {
+                    onYMinAutoChanged(true);
+                  } else {
+                    onYMinAutoChanged(false);
+                    onYMinChanged(val);
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: 4),
+            SizedBox(
+              width: 36,
+              child: _buildLabel(context, 'Max'),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: CompactNumberField(
+                value: yMaxAuto ? null : yMax,
+                hint: 'auto',
+                onChanged: (val) {
+                  if (val == null) {
+                    onYMaxAutoChanged(true);
+                  } else {
+                    onYMaxAutoChanged(false);
+                    onYMaxChanged(val);
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildModelFittingSection(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final mutedColor = isDark ? AppColorsDark.textMuted : AppColors.textMuted;
+
+    return _buildSection(
+      context,
+      icon: Icons.show_chart,
+      label: 'MODEL FITTING',
+      children: [
+        // High signal threshold
+        Row(
+          children: [
+            Expanded(
+              child: _buildLabel(context, 'High signal threshold'),
+            ),
+            Text(
+              highSignalThreshold.toStringAsFixed(2),
+              style: AppTextStyles.labelSmall.copyWith(color: mutedColor),
+            ),
+          ],
+        ),
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 4,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+          ),
+          child: Slider(
+            value: highSignalThreshold,
+            min: 0.80,
+            max: 1.00,
+            divisions: 20,
+            onChanged: onHighSignalThresholdChanged,
+          ),
+        ),
+        Text(
+          '0.80 - 1.00',
+          style: AppTextStyles.labelSmall.copyWith(color: mutedColor),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+
+        // Low signal threshold
+        Row(
+          children: [
+            Expanded(
+              child: _buildLabel(context, 'Low signal threshold'),
+            ),
+            Text(
+              lowSignalThreshold.toStringAsFixed(2),
+              style: AppTextStyles.labelSmall.copyWith(color: mutedColor),
+            ),
+          ],
+        ),
+        SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 4,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+          ),
+          child: Slider(
+            value: lowSignalThreshold,
+            min: 0.00,
+            max: 0.20,
+            divisions: 20,
+            onChanged: onLowSignalThresholdChanged,
+          ),
+        ),
+        Text(
+          '0.00 - 0.20',
+          style: AppTextStyles.labelSmall.copyWith(color: mutedColor),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildExportSection(BuildContext context) {
+    return _buildSection(
+      context,
+      icon: Icons.download,
+      label: 'EXPORT',
+      children: [
+        SizedBox(
+          width: double.infinity,
+          height: 32,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.image, size: 16),
+            label: const Text('Export as PNG', style: TextStyle(fontSize: 12)),
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('PNG export would happen here')),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        SizedBox(
+          width: double.infinity,
+          height: 32,
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.picture_as_pdf, size: 16),
+            label: const Text('Export as PDF', style: TextStyle(fontSize: 12)),
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('PDF export would happen here')),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInfoSection(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final linkColor = isDark ? AppColorsDark.link : AppColors.link;
+
+    return _buildSection(
+      context,
+      icon: Icons.info_outline,
+      label: 'INFO',
+      children: [
+        Row(
+          children: [
+            Text(
+              'GitHub: ',
+              style: AppTextStyles.label.copyWith(
+                color: isDark ? AppColorsDark.textPrimary : AppColors.textPrimary,
+              ),
+            ),
+            Expanded(
+              child: InkWell(
+                onTap: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Would open: github.com/tercen/mean_and_cv_flutter_operator'),
+                    ),
+                  );
+                },
+                child: Text(
+                  'mock-dev',
+                  style: AppTextStyles.label.copyWith(
+                    color: linkColor,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSection(BuildContext context, {
+    required IconData icon,
+    required String label,
+    required List<Widget> children,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final sectionBg = isDark ? AppColorsDark.surfaceElevated : AppColors.surfaceElevated;
+    final borderColor = isDark ? AppColorsDark.border : AppColors.border;
+    final mutedColor = isDark ? AppColorsDark.textMuted : AppColors.textMuted;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Section Header
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
+          decoration: BoxDecoration(
+            color: sectionBg,
+            border: Border(
+              bottom: BorderSide(color: borderColor, width: 1),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 12, color: mutedColor),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                label,
+                style: AppTextStyles.sectionHeader.copyWith(color: mutedColor),
+              ),
+            ],
+          ),
+        ),
+        // Section Content
+        Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLabel(BuildContext context, String text) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Text(
+      text,
+      style: AppTextStyles.label.copyWith(
+        color: isDark ? AppColorsDark.textSecondary : AppColors.textSecondary,
+      ),
+    );
+  }
+
+  Widget _buildSubLabel(BuildContext context, String text) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Text(
+      text,
+      style: AppTextStyles.labelSmall.copyWith(
+        color: isDark ? AppColorsDark.textMuted : AppColors.textMuted,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+}

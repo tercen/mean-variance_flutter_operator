@@ -3,7 +3,7 @@
   "description": "Mean-variance visualization with two-component error model fitting",
   "tags": ["visualization", "statistics", "mean", "variance", "CV", "SNR"],
   "authors": ["tercen"],
-  "urls": ["https://github.com/tercen/mean_and_cv_flutter_operator"],
+  "urls": ["https://github.com/tercen/mean-variance_flutter_operator"],
   "isWebApp": true,
   "serve": "build/web"
 }

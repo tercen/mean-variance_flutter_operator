@@ -329,11 +329,12 @@ class TercenDataService {
               .reduce((a, b) => a + b) / (measurements.length - 1);
           final sd = sqrt(variance);
 
-          // Calculate lvar = var(log(values)) matching Shiny's computeCVData
-          // Default to NaN (matching R's var() returning NA for < 2 values)
+          // Calculate lvar = var(log(values)) matching R's exact behavior:
+          // R: log(x<=0) = NaN, var(vector_with_NaN) = NaN (na.rm defaults to FALSE)
+          // So lvar is NaN if ANY measurement is non-positive
           double lvar = double.nan;
-          final logValues = measurements.where((v) => v > 0).map((v) => log(v)).toList();
-          if (logValues.length >= 2) {
+          if (measurements.length >= 2 && measurements.every((v) => v > 0)) {
+            final logValues = measurements.map((v) => log(v)).toList();
             final logMean = logValues.reduce((a, b) => a + b) / logValues.length;
             lvar = logValues
                 .map((lv) => pow(lv - logMean, 2))

@@ -329,6 +329,16 @@ class TercenDataService {
               .reduce((a, b) => a + b) / (measurements.length - 1);
           final sd = sqrt(variance);
 
+          // Calculate lvar = var(log(values)) matching Shiny's computeCVData
+          double lvar = 0.0;
+          final logValues = measurements.where((v) => v > 0).map((v) => log(v)).toList();
+          if (logValues.length >= 2) {
+            final logMean = logValues.reduce((a, b) => a + b) / logValues.length;
+            lvar = logValues
+                .map((lv) => pow(lv - logMean, 2))
+                .reduce((a, b) => a + b) / (logValues.length - 1);
+          }
+
           // Skip if values are NaN or infinite
           if (!mean.isFinite || !sd.isFinite) {
             pointsExcludedLowN++;
@@ -349,6 +359,7 @@ class TercenDataService {
             rowId: rowId,
             sd: sd,
             n: measurements.length,
+            lvar: lvar,
             bLow: bLow,
             bHigh: bHigh,
           ));

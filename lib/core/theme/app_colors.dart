@@ -37,16 +37,16 @@ class AppColors {
   static const Color highSignalPoint = Color(0xFF059669);  // green-600
   static const Color lowSignalPoint = Color(0xFF7C3AED);  // violet-600
 
-  // Pane colors for faceted charts
+  // Pane colors for faceted charts (all contrast well with red fit line)
   static const List<Color> paneColors = [
-    Color(0xFF1E40AF),  // blue-800
-    Color(0xFF047857),  // green-700
-    Color(0xFFB45309),  // amber-700
-    Color(0xFF7C3AED),  // violet-600
-    Color(0xFF0E7490),  // cyan-700
-    Color(0xFFDC2626),  // red-600
-    Color(0xFFDB2777),  // pink-600
-    Color(0xFF0891B2),  // teal-600
+    Color(0xFF377EB8),  // steel blue (ColorBrewer Set1)
+    Color(0xFF4DAF4A),  // green (ColorBrewer Set1)
+    Color(0xFF984EA3),  // purple (ColorBrewer Set1)
+    Color(0xFF1B9E77),  // teal (ColorBrewer Dark2)
+    Color(0xFFA65628),  // brown (ColorBrewer Set1)
+    Color(0xFF666666),  // grey
+    Color(0xFF1F78B4),  // dark blue (ColorBrewer Paired)
+    Color(0xFF33A02C),  // forest green (ColorBrewer Paired)
   ];
 
   // Interactive states

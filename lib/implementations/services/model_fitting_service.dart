@@ -82,13 +82,11 @@ class ModelFittingService {
           ssq0 = _pooledVarEst(lowVars, lowNs);
 
           // Calculate ssq1 from high-signal spots using log-variance
-          // lvar = var(log(values)) per group, approximated as log(1 + CV²)
+          // Uses real var(log(values)) computed from raw replicates (matching Shiny)
           final highLvars = <double>[];
           for (int i = 0; i < points.length; i++) {
-            if (bHigh[i] && points[i].mean > 0) {
-              final cv = points[i].sd / points[i].mean;
-              final lvar = log(1 + cv * cv);
-              if (lvar.isFinite) highLvars.add(lvar);
+            if (bHigh[i] && points[i].mean > 0 && points[i].lvar.isFinite && points[i].lvar > 0) {
+              highLvars.add(points[i].lvar);
             }
           }
 
@@ -173,6 +171,7 @@ class ModelFittingService {
           rowId: points[i].rowId,
           sd: points[i].sd,
           n: points[i].n,
+          lvar: points[i].lvar,
           bLow: bLow[i],
           bHigh: bHigh[i],
         ));

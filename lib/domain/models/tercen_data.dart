@@ -12,6 +12,7 @@ class TercenDataPoint {
   final String rowId; // Row identifier from .ri (e.g., gene/protein name)
   final double sd; // Standard deviation
   final int n; // Replicate count
+  final double lvar; // var(log(values)) - for model fitting (matches Shiny's lvar)
   final bool bLow; // true if mean < lowThreshold
   final bool bHigh; // true if mean > highThreshold
 
@@ -25,6 +26,7 @@ class TercenDataPoint {
     required this.rowId,
     required this.sd,
     required this.n,
+    this.lvar = 0.0,
     this.bLow = false,
     this.bHigh = false,
   });

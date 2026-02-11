@@ -215,9 +215,9 @@ class MeanVarianceChartPainter extends CustomPainter {
 
       // Draw shape based on bHigh classification (matches Shiny: shape = bHigh)
       if (showFit && point.bHigh) {
-        _drawTriangle(canvas, Offset(canvasX, canvasY), 3.5, pointColor);
+        _drawTriangle(canvas, Offset(canvasX, canvasY), 2.5, pointColor);
       } else {
-        _drawCircle(canvas, Offset(canvasX, canvasY), 2.5, pointColor);
+        _drawCircle(canvas, Offset(canvasX, canvasY), 1.5, pointColor);
       }
     }
   }

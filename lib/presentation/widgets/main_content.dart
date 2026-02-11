@@ -180,7 +180,7 @@ class _MainContentState extends State<MainContent> {
                 const SizedBox(height: AppSpacing.md),
 
                 // Legend
-                if (widget.showModelFit) _buildLegend(context),
+                if (widget.showModelFit) _buildLegend(context, dataset),
 
                 // Fit Results Table (below charts, not in right panel)
                 if (widget.showModelFit && !_isTableCollapsed) ...[
@@ -240,35 +240,86 @@ class _MainContentState extends State<MainContent> {
     );
   }
 
-  Widget _buildCombinedChart(BuildContext context, TercenDataset dataset) {
-    // For combined view, merge all data points
+  /// Build combined chart data: merge all pane points with per-pane colorIndex,
+  /// then re-fit the model on the combined dataset (matching Shiny's Collapse Panes).
+  ChartData _getCombinedChartData(TercenDataset dataset) {
+    // Assign color indices by pane key (sorted for consistency)
+    final paneKeys = dataset.chartData.keys.toList()..sort();
+    final paneColorMap = <String, int>{};
+    for (int i = 0; i < paneKeys.length; i++) {
+      paneColorMap[paneKeys[i]] = i;
+    }
+
+    // Merge all points with per-pane colorIndex
     final allPoints = <TercenDataPoint>[];
-    for (final chartData in dataset.chartData.values) {
-      allPoints.addAll(chartData.points);
+    for (final entry in dataset.chartData.entries) {
+      final colorIdx = paneColorMap[entry.key]! % 8;
+      for (final point in entry.value.points) {
+        allPoints.add(TercenDataPoint(
+          x: point.x,
+          y: point.y,
+          rowIndex: point.rowIndex,
+          colorIndex: colorIdx,
+          testCondition: point.testCondition,
+          supergroup: point.supergroup,
+          rowId: point.rowId,
+          sd: point.sd,
+          n: point.n,
+          lvar: point.lvar,
+          bLow: point.bLow,
+          bHigh: point.bHigh,
+        ));
+      }
     }
 
     if (allPoints.isEmpty) {
-      return const Center(child: Text('No data available'));
+      return ChartData(
+        supergroup: 'Combined',
+        testCondition: 'All',
+        points: [],
+        minX: 0, maxX: 1, minY: 0, maxY: 1,
+      );
     }
 
     final xValues = allPoints.map((p) => p.x).toList();
     final yValues = allPoints.map((p) => p.y).toList();
-    final minX = xValues.reduce((a, b) => a < b ? a : b);
-    final maxX = xValues.reduce((a, b) => a > b ? a : b);
-    final minY = yValues.reduce((a, b) => a < b ? a : b);
-    final maxY = yValues.reduce((a, b) => a > b ? a : b);
 
-    final combinedData = ChartData(
+    ChartData combinedData = ChartData(
       supergroup: 'Combined',
       testCondition: 'All',
       points: allPoints,
-      minX: minX,
-      maxX: maxX,
-      minY: minY,
-      maxY: maxY,
+      minX: xValues.reduce((a, b) => a < b ? a : b),
+      maxX: xValues.reduce((a, b) => a > b ? a : b),
+      minY: yValues.reduce((a, b) => a < b ? a : b),
+      maxY: yValues.reduce((a, b) => a > b ? a : b),
     );
 
-    return _buildSingleChart(context, combinedData, isFullWidth: true);
+    // Re-fit the model on combined data
+    if (widget.showModelFit) {
+      final fittingService = ModelFittingService();
+      try {
+        combinedData = fittingService.fitModel(
+          chartData: combinedData,
+          lowThreshold: widget.lowThreshold,
+          highThreshold: widget.highThreshold,
+        );
+      } catch (e) {
+        debugPrint('⚠ Error fitting combined data: $e');
+      }
+    }
+
+    return combinedData;
+  }
+
+  Widget _buildCombinedChart(BuildContext context, TercenDataset dataset) {
+    final combinedData = _getCombinedChartData(dataset);
+
+    if (combinedData.points.isEmpty) {
+      return const Center(child: Text('No data available'));
+    }
+
+    return _buildSingleChart(context, combinedData,
+        isFullWidth: true, isCombined: true);
   }
 
   Widget _buildSingleChart(
@@ -279,6 +330,7 @@ class _MainContentState extends State<MainContent> {
     int groupIndex = 0,
     int totalSupergroups = 1,
     int totalGroups = 1,
+    bool isCombined = false,
   }) {
     // ALWAYS WHITE BACKGROUND (export-ready, not theme-dependent)
     const chartBgColor = Colors.white;
@@ -306,7 +358,7 @@ class _MainContentState extends State<MainContent> {
         children: [
           // Pane title
           Text(
-            chartData.paneKey,
+            isCombined ? 'All panes combined' : chartData.paneKey,
             style: AppTextStyles.plotTitle.copyWith(color: textColor),
             textAlign: TextAlign.center,
           ),
@@ -342,6 +394,7 @@ class _MainContentState extends State<MainContent> {
                             groupIndex: groupIndex,
                             totalSupergroups: totalSupergroups,
                             totalGroups: totalGroups,
+                            isCombined: isCombined,
                           ),
                           size: Size.infinite,
                         ),
@@ -469,30 +522,68 @@ class _MainContentState extends State<MainContent> {
     );
   }
 
-  Widget _buildLegend(BuildContext context) {
+  Widget _buildLegend(BuildContext context, TercenDataset dataset) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor =
         isDark ? AppColorsDark.textSecondary : AppColors.textSecondary;
 
+    final children = <Widget>[];
+
+    // Per-pane color legend (always when showModelFit, for combined shows each pane)
+    if (widget.combineGroups) {
+      final paneKeys = dataset.chartData.keys.toList()..sort();
+      for (int i = 0; i < paneKeys.length; i++) {
+        final color = AppColors.paneColors[i % 8];
+        children.add(_buildColorLegendItem(paneKeys[i], color, textColor));
+      }
+    }
+
+    // bHigh marker
+    if (widget.showModelFit) {
+      children.add(Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CustomPaint(
+            size: const Size(10, 10),
+            painter: _TriangleIconPainter(color: textColor),
+          ),
+          const SizedBox(width: 4),
+          Text('High signal (bHigh)',
+              style: AppTextStyles.label.copyWith(color: textColor)),
+        ],
+      ));
+    }
+
+    // Fit line (red)
+    if (widget.showModelFit) {
+      children.add(Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 16, height: 2, color: const Color(0xFFDC2626)),
+          const SizedBox(width: 4),
+          Text('Fit line',
+              style: AppTextStyles.label.copyWith(color: textColor)),
+        ],
+      ));
+    }
+
     return Wrap(
       spacing: AppSpacing.md,
       runSpacing: AppSpacing.sm,
-      children: [
-        _buildLegendItem('● Data points', textColor),
-        if (widget.showModelFit)
-          _buildLegendItem('— Fit line', textColor),
-      ],
+      children: children,
     );
   }
 
-  Widget _buildLegendItem(String label, Color color) {
+  Widget _buildColorLegendItem(String label, Color dotColor, Color textColor) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          label,
-          style: AppTextStyles.label.copyWith(color: color),
+        Container(
+          width: 8, height: 8,
+          decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
         ),
+        const SizedBox(width: 4),
+        Text(label, style: AppTextStyles.label.copyWith(color: textColor)),
       ],
     );
   }
@@ -513,20 +604,15 @@ class _MainContentState extends State<MainContent> {
     final fitResults = <Map<String, dynamic>>[];
 
     if (widget.combineGroups) {
-      // For combined view, aggregate all chart data
-      final allCharts = dataset.chartData.values.toList();
-      if (allCharts.isNotEmpty) {
-        // Use first chart's fit results as representative
-        // (In practice, we'd need to refit the combined data)
-        final firstChart = allCharts.first;
-        fitResults.add({
-          'pane': 'Combined',
-          'sigma0': firstChart.sigma0,
-          'cv1': firstChart.cv1,
-          'snr': firstChart.snr,
-          'converged': firstChart.converged,
-        });
-      }
+      // Re-fit model on combined data (matching Shiny's Collapse Panes)
+      final combinedData = _getCombinedChartData(dataset);
+      fitResults.add({
+        'pane': 'All panes combined',
+        'sigma0': combinedData.sigma0,
+        'cv1': combinedData.cv1,
+        'snr': combinedData.snr,
+        'converged': combinedData.converged,
+      });
     } else {
       final supergroups = dataset.getSupergroupsOrdered();
       final testConditions = dataset.getTestConditionsOrdered();
@@ -713,5 +799,28 @@ class _MainContentState extends State<MainContent> {
       ),
     );
   }
+}
+
+/// Small triangle icon painter for legend
+class _TriangleIconPainter extends CustomPainter {
+  final Color color;
+  _TriangleIconPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+    final path = Path()
+      ..moveTo(size.width / 2, size.height)
+      ..lineTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_TriangleIconPainter oldDelegate) =>
+      color != oldDelegate.color;
 }
 

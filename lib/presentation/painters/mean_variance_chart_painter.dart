@@ -25,6 +25,7 @@ class MeanVarianceChartPainter extends CustomPainter {
   final int groupIndex;
   final int totalSupergroups;
   final int totalGroups;
+  final bool isCombined;
 
   MeanVarianceChartPainter({
     required this.chartData,
@@ -39,6 +40,7 @@ class MeanVarianceChartPainter extends CustomPainter {
     this.groupIndex = 0,
     this.totalSupergroups = 1,
     this.totalGroups = 1,
+    this.isCombined = false,
   });
 
   @override
@@ -202,9 +204,14 @@ class MeanVarianceChartPainter extends CustomPainter {
       // Determine color
       Color pointColor;
       if (showFit) {
-        // Color by supergroup×group position (cycle through 8 pane colors)
-        final colorIndex = (supergroupIndex * totalGroups + groupIndex) % 8;
-        pointColor = AppColors.paneColors[colorIndex];
+        if (isCombined) {
+          // Combined view: use per-point colorIndex (set by pane origin)
+          pointColor = AppColors.paneColors[point.colorIndex % 8];
+        } else {
+          // Grid view: color by supergroup×group position
+          final colorIndex = (supergroupIndex * totalGroups + groupIndex) % 8;
+          pointColor = AppColors.paneColors[colorIndex];
+        }
       } else {
         // All points blue when fit disabled
         pointColor = const Color(0xFF1E40AF);
@@ -308,7 +315,8 @@ class MeanVarianceChartPainter extends CustomPainter {
         xMin != oldDelegate.xMin ||
         xMax != oldDelegate.xMax ||
         yMin != oldDelegate.yMin ||
-        yMax != oldDelegate.yMax;
+        yMax != oldDelegate.yMax ||
+        isCombined != oldDelegate.isCombined;
   }
 }
 

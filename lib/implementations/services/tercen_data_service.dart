@@ -330,7 +330,8 @@ class TercenDataService {
           final sd = sqrt(variance);
 
           // Calculate lvar = var(log(values)) matching Shiny's computeCVData
-          double lvar = 0.0;
+          // Default to NaN (matching R's var() returning NA for < 2 values)
+          double lvar = double.nan;
           final logValues = measurements.where((v) => v > 0).map((v) => log(v)).toList();
           if (logValues.length >= 2) {
             final logMean = logValues.reduce((a, b) => a + b) / logValues.length;

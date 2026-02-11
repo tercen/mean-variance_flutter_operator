@@ -87685,7 +87685,7 @@ a9=Math.sqrt(a6.er(a7,new A.amz(a8),n).cP(0,new A.amA())/(a6.gH(a7)-1))
 b0=a6.ik(a7,new A.amB())
 b1=b0.$ti.j("dF<1,K>")
 b2=A.a4(new A.dF(b0,new A.amC(),b1),b1.j("w.E"))
-b3=b2.length>=2?new A.U(b2,new A.amD(B.b.cP(b2,new A.amE())/b2.length),A.V(b2).j("U<1,cs>")).cP(0,new A.amF())/(b2.length-1):0
+b3=b2.length>=2?new A.U(b2,new A.amD(B.b.cP(b2,new A.amE())/b2.length),A.V(b2).j("U<1,cs>")).cP(0,new A.amF())/(b2.length-1):0/0
 if(!isFinite(a8)||!isFinite(a9)){++a
 continue}a5.push(new A.fV(a8,a9,a5.length,0,i,j,k,a9,a6.gH(a7),b3,a8>b9));++b}if(a5.length===0)continue
 b4=A.a4(new A.U(a5,new A.ams(),p),o)

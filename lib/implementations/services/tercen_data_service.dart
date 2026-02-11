@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:sci_tercen_client/sci_client.dart' show CubeQueryTask, RunWebAppTask, Task;
+import 'package:sci_tercen_client/sci_client_service_factory.dart' show ServiceFactory;
 import '../../domain/models/tercen_data.dart';
 import '../../main.dart';
 
@@ -10,13 +11,13 @@ import '../../main.dart';
 /// - Pattern: column-data-extraction.md
 /// - Pattern: metadata-data-resolution.md
 class TercenDataService {
-  final dynamic _serviceFactory;
+  final ServiceFactory _serviceFactory;
 
   TercenDataService(this._serviceFactory);
 
   /// Factory constructor using GetIt singleton
   factory TercenDataService.fromGetIt() {
-    return TercenDataService(getIt.get());
+    return TercenDataService(getIt.get<ServiceFactory>());
   }
 
   /// Extract data from Tercen task context

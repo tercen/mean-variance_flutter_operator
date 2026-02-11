@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:get_it/get_it.dart';
+import 'package:sci_tercen_client/sci_client_service_factory.dart' show ServiceFactory;
 import 'package:sci_tercen_client/sci_service_factory_web.dart';
 
 import 'core/theme/app_theme.dart';
@@ -16,7 +17,7 @@ void main() async {
   // Initialize Tercen ServiceFactory (handles auth automatically)
   try {
     final tercenFactory = await createServiceFactoryForWebApp();
-    getIt.registerSingleton(tercenFactory);
+    getIt.registerSingleton<ServiceFactory>(tercenFactory);
     debugPrint('✓ Tercen ServiceFactory initialized successfully');
   } catch (e) {
     debugPrint('⚠ Tercen ServiceFactory initialization failed: $e');

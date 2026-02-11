@@ -145,6 +145,8 @@ class _MeanAndCvScreenState extends State<MeanAndCvScreen> {
                     yMax: _yMaxAuto ? null : _yMax,
                     lowThreshold: _lowSignalThreshold,
                     highThreshold: _highSignalThreshold,
+                    exportWidth: _exportWidth,
+                    exportHeight: _exportHeight,
                     repaintBoundaryKey: _repaintBoundaryKey,
                     onGridDimensions: (nSupergroups, nGroups) {
                       _nSupergroups = nSupergroups;

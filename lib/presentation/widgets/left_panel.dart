@@ -602,28 +602,10 @@ class _LeftPanelState extends State<LeftPanel> {
     required int value,
     required ValueChanged<int?> onChanged,
   }) {
-    return SizedBox(
-      height: 36,
-      child: TextField(
-        controller: TextEditingController(text: value.toString()),
-        keyboardType: TextInputType.number,
-        style: AppTextStyles.bodySmall,
-        decoration: InputDecoration(
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 8,
-          ),
-          prefixText: '$label ',
-          prefixStyle: AppTextStyles.bodySmall.copyWith(
-            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
-          ),
-        ),
-        onChanged: (v) {
-          final parsed = int.tryParse(v);
-          onChanged(parsed);
-        },
-      ),
+    return _DimensionField(
+      label: label,
+      value: value,
+      onChanged: onChanged,
     );
   }
 
@@ -745,6 +727,80 @@ class _LeftPanelState extends State<LeftPanel> {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           visualDensity: VisualDensity.compact,
         ),
+      ),
+    );
+  }
+}
+
+/// Stateful dimension field with persistent TextEditingController.
+/// Prevents the field from losing focus on every keystroke.
+class _DimensionField extends StatefulWidget {
+  final String label;
+  final int value;
+  final ValueChanged<int?> onChanged;
+
+  const _DimensionField({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  State<_DimensionField> createState() => _DimensionFieldState();
+}
+
+class _DimensionFieldState extends State<_DimensionField> {
+  late TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.value.toString());
+  }
+
+  @override
+  void didUpdateWidget(_DimensionField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value) {
+      // Only update text if current text doesn't already represent the new value.
+      final currentParsed = int.tryParse(_controller.text);
+      if (currentParsed != widget.value) {
+        _controller.text = widget.value.toString();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 36,
+      child: TextField(
+        controller: _controller,
+        keyboardType: TextInputType.number,
+        style: AppTextStyles.bodySmall,
+        decoration: InputDecoration(
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 8,
+          ),
+          prefixText: '${widget.label} ',
+          prefixStyle: AppTextStyles.bodySmall.copyWith(
+            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+          ),
+        ),
+        onChanged: (v) {
+          final parsed = int.tryParse(v);
+          if (parsed != null && parsed > 0) {
+            widget.onChanged(parsed);
+          }
+        },
       ),
     );
   }

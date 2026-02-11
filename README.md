@@ -1,152 +1,66 @@
-# Mean-Variance Flutter Operator - Mock Implementation
+# Mean and CV Flutter Operator
 
-A Tercen operator for visualizing and analyzing measurement variability through mean-variance plots. Supports multiple plot types: CV (Coefficient of Variation), SNR (Signal-to-Noise Ratio), and SD (Standard Deviation) with two-component error model fitting.
+##### Description
 
-## Current Status
+The `mean_and_cv_flutter_operator` is a Flutter web app used for creating CV plots, and fitting the variation as a function of intensity to the Two Component Error Model. This is the Flutter/WASM replacement for the original [mean_and_cv_shiny_operator](https://github.com/tercen/mean_and_cv_shiny_operator).
 
-**Mock Implementation** - UI/UX prototype with placeholder data
+##### Usage
 
-This is a visual mock demonstrating the complete UI design following the Tercen design system. The statistical computation and real data integration will be implemented in the next phase.
+Input projection|.
+---|---
+`row`   | represents the variables (e.g. ID)
+`col`   | represents the category (e.g. barcode, Sample Name)
+`y-axis`| measurement value
+`color`	| color (e.g. barcode, Sample Name)
 
-## Features Implemented
+Output relations|.
+---|---
+`Operator view` | view of the Flutter web application
 
-### UI Components
-✅ Complete Tercen app frame structure
-✅ Context detection (taskId parameter)
-✅ Conditional top bar (fullscreen mode only)
-✅ Left panel with 5 sections:
-  - **DISPLAY**: Chart title, plot type selector, model fit toggle, combine groups toggle
-  - **AXES**: Log scale, X/Y axis limits with auto checkboxes
-  - **MODEL FITTING**: High/low signal threshold sliders
-  - **EXPORT**: PNG and PDF export buttons (placeholders)
-  - **INFO**: GitHub version link
-✅ Main content area with horizontal split layout
-✅ Chart title display (when provided)
-✅ Mock scatter plot visualization (4 panes in faceted view)
-✅ Fit results table panel (collapsible)
-✅ Light/dark theme with teal primary (Feb 2026 Tercen design)
-✅ Theme persistence with SharedPreferences
+##### Details
 
-### Design System
-- Tercen design tokens (Feb 2026 update)
-- Light theme: Blue primary (#1E40AF)
-- Dark theme: Teal primary (#14B8A6), Blue links (#60A5FA)
-- Material 3 component theming
-- Responsive layout
-- 4px base spacing unit
-- Complete typography system
+The operator creates CV (Coefficient of Variation), SNR (Signal-to-Noise Ratio), and SD (Standard Deviation) plots. It fits the Two Component Error Model to the data and displays the fit curve overlaid on the scatter plot.
 
-## Getting Started
+The crosstab grid is laid out as follows:
+- **Rows** (supergroups): determined by the `color` projection
+- **Columns** (test conditions): determined by the `col` projection
+- Each pane shows a scatter plot of the selected metric (CV, SNR, or SD) against mean intensity
+- The "Combine Groups" toggle collapses all panes into a single combined view with per-pane coloring
 
-### Prerequisites
+**Two Component Error Model**: `variance = σ₀² + CV₁² × mean²`
 
-- Flutter SDK 3.0.0 or higher
-- Dart SDK 3.0.0 or higher
+The model is fitted iteratively using quantile-based thresholds to classify points as low-signal (used to estimate σ₀) and high-signal (used to estimate CV₁ from log-variance). SNR is reported in dB as `-10 × log₁₀(CV₁)`.
 
-### Installation
+##### Controls
+
+- **Display**: Chart title, plot type (CV/SNR/SD), model fit toggle, combine groups toggle
+- **Axes**: Log x-axis, manual X/Y axis limits with auto checkboxes
+- **Model Fitting**: High and low signal quantile threshold sliders (0.0–1.0)
+- **Export**: PNG and PDF download with per-pane size controls (width × height in pixels)
+
+##### Context Detection
+
+The app detects whether it is running embedded in Tercen or standalone:
+- **Embedded** (`?taskId=xxx` in URL): connects to the Tercen API to load real crosstab data
+- **Standalone** (no `taskId`): falls back to bundled CSV example data and shows a top bar with "FULL SCREEN MODE" badge
+
+##### Building
 
 ```bash
 # Get dependencies
 flutter pub get
 
-# Run in Chrome (recommended for web apps)
+# Build for Tercen deployment (WASM)
+flutter build web --wasm --release
+
+# Run locally in Chrome
 flutter run -d chrome
-
-# Run in Edge
-flutter run -d edge
-
-# Build for web
-flutter build web
 ```
 
-### Development Mode
+The built output is served from `build/web` as configured in `operator.json`.
 
-The app detects whether it's running embedded in Tercen or standalone:
+##### See Also
 
-- **Standalone** (no `taskId` parameter): Shows top bar with "FULL SCREEN MODE" badge
-- **Embedded** (`?taskId=xxx` in URL): Hides top bar (normal Tercen workflow mode)
-
-To test embedded mode locally:
-```
-http://localhost:XXXX/?taskId=test123
-```
-
-## Project Structure
-
-```
-lib/
-├── core/
-│   ├── theme/
-│   │   ├── app_colors.dart          # Light theme colors
-│   │   ├── app_colors_dark.dart     # Dark theme colors (teal primary)
-│   │   ├── app_spacing.dart         # Spacing constants
-│   │   ├── app_text_styles.dart     # Typography
-│   │   └── app_theme.dart           # Material 3 theme configuration
-│   └── utils/
-│       └── context_detector.dart    # taskId detection
-├── presentation/
-│   ├── providers/
-│   │   └── theme_provider.dart      # Theme state with persistence
-│   ├── screens/
-│   │   └── mean_and_cv_screen.dart  # Main screen
-│   └── widgets/
-│       ├── left_panel.dart          # Left panel with 5 sections
-│       ├── main_content.dart        # Chart area + table
-│       └── top_bar.dart             # Conditional top bar
-└── main.dart                         # Entry point
-```
-
-## Mock Data
-
-The current implementation uses placeholder data:
-- **4 mock panes**: Group1.Control, Group1.Treatment, Group2.Control, Group2.Treatment
-- **Mock scatter plots**: Procedurally generated points with fit curves
-- **Mock fit results**: Hardcoded σ₀, CV₁, and SNR values
-
-## Controls (Interactive)
-
-All controls are fully interactive in the mock:
-
-✅ Theme toggle (light/dark)
-✅ Panel collapse/expand
-✅ Chart title input
-✅ Plot type selector (CV/SNR/SD)
-✅ Show model fit toggle
-✅ Combine all groups toggle
-✅ Log x-axis checkbox
-✅ Axis limit inputs with auto checkboxes
-✅ High/low signal threshold sliders
-✅ Export buttons (show placeholder messages)
-✅ Fit results table collapse
-
-Charts update visually based on:
-- Plot type selection (shows different y-axis label)
-- Show model fit toggle (shows/hides red fit line)
-- Combine groups toggle (single chart vs 2x2 grid)
-- Table shows/hides based on model fit toggle
-
-## Next Steps
-
-### Phase 2: Data Integration
-1. Integrate with Tercen data model (`.ri`, `.ci`, `.y` projections)
-2. Implement replicate grouping and statistics computation
-3. Add real scatter plot rendering with fl_chart library
-4. Implement two-component error model fitting algorithm
-
-### Phase 3: Advanced Features
-1. Real PNG/PDF export functionality
-2. Chart interactivity (zoom, pan, tooltips)
-3. Legend click-to-highlight
-4. Table row click to highlight corresponding pane
-5. Panel resize with drag handle
-
-## References
-
-- Functional Specification: `functional_specification.md`
-- Tercen Design System: `_local/tercen-style/`
-- Original R/Shiny Implementation: `_local/mean_and_cv_shiny_operator/`
-
-## License
-
-Copyright © Tercen
-For Tercen platform use only
+[mean_and_cv_shiny_operator](https://github.com/tercen/mean_and_cv_shiny_operator)
+[mean_operator](https://github.com/tercen/mean_operator)
+[mean_sd_operator](https://github.com/tercen/mean_sd_operator)

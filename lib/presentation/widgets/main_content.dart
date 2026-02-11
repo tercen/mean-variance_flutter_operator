@@ -26,6 +26,8 @@ class MainContent extends StatefulWidget {
   final double highThreshold;
   final GlobalKey? repaintBoundaryKey;
   final void Function(int nSupergroups, int nGroups)? onGridDimensions;
+  final int exportWidth;
+  final int exportHeight;
 
   const MainContent({
     super.key,
@@ -42,6 +44,8 @@ class MainContent extends StatefulWidget {
     this.highThreshold = 1000.0,
     this.repaintBoundaryKey,
     this.onGridDimensions,
+    this.exportWidth = 600,
+    this.exportHeight = 400,
   });
 
   @override
@@ -391,15 +395,24 @@ class _MainContentState extends State<MainContent> {
             ? 'SNR (dB)'
             : 'Standard Deviation';
 
-    return Container(
-      height: isFullWidth ? 550 : 450,
-      decoration: BoxDecoration(
-        color: chartBgColor,
-        border: Border.all(color: borderColor),
-        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-      ),
-      padding: const EdgeInsets.all(AppSpacing.md),
-      child: Column(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Calculate chart height from available width and export aspect ratio
+        // so that width-based export scaling produces the correct per-pane height.
+        final aspectRatio = widget.exportHeight / widget.exportWidth;
+        final chartHeight = constraints.maxWidth.isFinite
+            ? constraints.maxWidth * aspectRatio
+            : (isFullWidth ? 550.0 : 450.0);
+
+        return Container(
+          height: chartHeight,
+          decoration: BoxDecoration(
+            color: chartBgColor,
+            border: Border.all(color: borderColor),
+            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+          ),
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Pane title
@@ -476,6 +489,8 @@ class _MainContentState extends State<MainContent> {
           ),
         ],
       ),
+        );
+      },
     );
   }
 

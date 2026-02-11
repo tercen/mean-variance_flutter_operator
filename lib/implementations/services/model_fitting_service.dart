@@ -85,7 +85,7 @@ class ModelFittingService {
           // Uses real var(log(values)) computed from raw replicates (matching Shiny)
           final highLvars = <double>[];
           for (int i = 0; i < points.length; i++) {
-            if (bHigh[i] && points[i].mean > 0 && points[i].lvar.isFinite && points[i].lvar > 0) {
+            if (bHigh[i] && points[i].mean > 0 && points[i].lvar.isFinite) {
               highLvars.add(points[i].lvar);
             }
           }
@@ -186,12 +186,12 @@ class ModelFittingService {
       if (!ssq0.isNaN && !ssq1.isNaN) {
         sigma0Val = sqrt(ssq0);
         cv1Val = sqrt(ssq1);
-        snrVal = ssq1 > 0 ? 1.0 / sqrt(ssq1) : 0.0;
+        snrVal = ssq1 > 0 ? -10.0 * (log(sqrt(ssq1)) / ln10) : 0.0;
         didConverge = true;
 
         debugPrint('σ₀ (sqrt(ssq0)): ${sigma0Val.toStringAsFixed(4)}');
         debugPrint('CV₁ (sqrt(ssq1)): ${cv1Val.toStringAsFixed(6)}');
-        debugPrint('SNR (1/CV₁): ${snrVal.toStringAsFixed(2)}');
+        debugPrint('SNR (-10*log10(CV₁) dB): ${snrVal.toStringAsFixed(2)}');
 
         fitCurve = _generateFitCurve(points, ssq0, ssq1);
         debugPrint('Fit curve: ${fitCurve.length} points');

@@ -46,16 +46,23 @@ class MainContent extends StatefulWidget {
 
 class _MainContentState extends State<MainContent> {
   bool _isTableCollapsed = false;
-  late Future<TercenDataset> _dataFuture;
+  late Future<TercenDataset> _rawDataFuture;
+
+  // Cache fitted dataset so we only re-fit when thresholds change
+  TercenDataset? _fittedDataset;
+  double? _fittedLowThreshold;
+  double? _fittedHighThreshold;
+  bool? _fittedShowModelFit;
 
   @override
   void initState() {
     super.initState();
-    _dataFuture = _loadData();
+    _rawDataFuture = _loadRawData();
   }
 
-  /// Load data from Tercen context or fall back to CSV mock
-  Future<TercenDataset> _loadData() async {
+  /// Load raw data from Tercen context or fall back to CSV mock.
+  /// Model fitting is applied separately so threshold changes don't reload data.
+  Future<TercenDataset> _loadRawData() async {
     TercenDataset dataset;
 
     try {
@@ -86,39 +93,60 @@ class _MainContentState extends State<MainContent> {
       dataset = await CsvParserService.parseExampleData();
     }
 
-    // Apply model fitting if enabled
-    if (widget.showModelFit) {
-      debugPrint('');
-      debugPrint('🟣 Applying model fitting to dataset');
-      debugPrint('   Low threshold: ${widget.lowThreshold}');
-      debugPrint('   High threshold: ${widget.highThreshold}');
+    return dataset;
+  }
 
-      final fittingService = ModelFittingService();
-      final fittedChartData = <String, ChartData>{};
-
-      for (final entry in dataset.chartData.entries) {
-        try {
-          fittedChartData[entry.key] = fittingService.fitModel(
-            chartData: entry.value,
-            lowThreshold: widget.lowThreshold,
-            highThreshold: widget.highThreshold,
-          );
-        } catch (e) {
-          debugPrint('⚠ Error fitting ${entry.key}: $e');
-          // Use original data if fitting fails
-          fittedChartData[entry.key] = entry.value;
-        }
-      }
-
-      dataset = TercenDataset(
-        supergroups: dataset.supergroups,
-        testConditions: dataset.testConditions,
-        chartData: fittedChartData,
-      );
-
-      debugPrint('✅ Model fitting complete');
+  /// Apply model fitting to raw dataset, caching result until thresholds change.
+  TercenDataset _getOrApplyFitting(TercenDataset rawDataset) {
+    // Return cached result if thresholds haven't changed
+    if (_fittedDataset != null &&
+        _fittedLowThreshold == widget.lowThreshold &&
+        _fittedHighThreshold == widget.highThreshold &&
+        _fittedShowModelFit == widget.showModelFit) {
+      return _fittedDataset!;
     }
 
+    if (!widget.showModelFit) {
+      _fittedDataset = rawDataset;
+      _fittedLowThreshold = widget.lowThreshold;
+      _fittedHighThreshold = widget.highThreshold;
+      _fittedShowModelFit = widget.showModelFit;
+      return rawDataset;
+    }
+
+    debugPrint('');
+    debugPrint('🟣 Applying model fitting to dataset');
+    debugPrint('   Low threshold: ${widget.lowThreshold}');
+    debugPrint('   High threshold: ${widget.highThreshold}');
+
+    final fittingService = ModelFittingService();
+    final fittedChartData = <String, ChartData>{};
+
+    for (final entry in rawDataset.chartData.entries) {
+      try {
+        fittedChartData[entry.key] = fittingService.fitModel(
+          chartData: entry.value,
+          lowThreshold: widget.lowThreshold,
+          highThreshold: widget.highThreshold,
+        );
+      } catch (e) {
+        debugPrint('⚠ Error fitting ${entry.key}: $e');
+        fittedChartData[entry.key] = entry.value;
+      }
+    }
+
+    final dataset = TercenDataset(
+      supergroups: rawDataset.supergroups,
+      testConditions: rawDataset.testConditions,
+      chartData: fittedChartData,
+    );
+
+    debugPrint('✅ Model fitting complete');
+
+    _fittedDataset = dataset;
+    _fittedLowThreshold = widget.lowThreshold;
+    _fittedHighThreshold = widget.highThreshold;
+    _fittedShowModelFit = widget.showModelFit;
     return dataset;
   }
 
@@ -130,7 +158,7 @@ class _MainContentState extends State<MainContent> {
     return Container(
       color: bgColor,
       child: FutureBuilder<TercenDataset>(
-        future: _dataFuture,
+        future: _rawDataFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -147,7 +175,8 @@ class _MainContentState extends State<MainContent> {
             );
           }
 
-          final dataset = snapshot.data!;
+          // Apply model fitting with current thresholds (cached until they change)
+          final dataset = _getOrApplyFitting(snapshot.data!);
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(AppSpacing.md),

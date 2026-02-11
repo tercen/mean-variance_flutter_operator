@@ -1,6 +1,6 @@
 import 'dart:math';
 import 'package:flutter/foundation.dart';
-import 'package:sci_tercen_client/sci_client.dart' show CubeQueryTask, RunWebAppTask, Task;
+import 'package:sci_tercen_client/sci_client.dart' show CubeQueryTask, RunWebAppTask;
 import 'package:sci_tercen_client/sci_client_service_factory.dart' show ServiceFactory;
 import '../../domain/models/tercen_data.dart';
 import '../../main.dart';
@@ -40,8 +40,8 @@ class TercenDataService {
       // Step 1: Get task and navigate hierarchy
       final cubeTask = await _navigateToCubeQueryTask(taskId);
 
-      // Step 2: Extract data from task JSON (CRITICAL: NOT schema API!)
-      final extractedData = await _extractDataFromTaskJson(cubeTask);
+      // Step 2: Extract data via tableSchemaService API
+      final extractedData = await _extractDataViaApi(cubeTask);
 
       // Step 3: Build grid structure
       final dataset = _buildGridStructure(
@@ -101,134 +101,149 @@ class TercenDataService {
     return cubeTask;
   }
 
-  /// Extract data from task JSON using proper patterns
-  /// CRITICAL: Schema APIs filter dot-prefixed columns BY DESIGN (Issue #11)
-  /// Must use task.toJson() and navigate relation hierarchy
-  Future<_ExtractedData> _extractDataFromTaskJson(CubeQueryTask cubeTask) async {
+  /// Extract cross-tab data using tableSchemaService API
+  /// Uses query.qtHash to fetch .y, .ri, .ci from the computed data table,
+  /// and query.columnHash to resolve group/condition labels.
+  Future<_ExtractedData> _extractDataViaApi(CubeQueryTask cubeTask) async {
     debugPrint('');
-    debugPrint('STEP 2: Extract data from task JSON');
+    debugPrint('STEP 2: Extract data via tableSchemaService API');
     debugPrint('--------------------------------');
-    debugPrint('CRITICAL: Using task.toJson() (schema APIs filter dot-prefixed columns)');
 
-    // Convert to JSON to access unfiltered columns
-    final taskJson = cubeTask.toJson();
-    final queryJson = taskJson['query'] as Map?;
+    final query = cubeTask.query;
+    final qtHash = query.qtHash;
 
-    if (queryJson == null || queryJson['relation'] == null) {
-      throw Exception('Task has no query relation');
+    if (qtHash.isEmpty) {
+      throw Exception('CubeQuery has empty qtHash');
     }
 
-    // Navigate relation hierarchy to find InMemoryTable
-    debugPrint('Navigating relation hierarchy...');
-    var currentRelation = queryJson['relation'] as Map?;
-    int depth = 0;
-    const maxDepth = 20;
+    debugPrint('qtHash: $qtHash');
+    debugPrint('columnHash: ${query.columnHash}');
+    debugPrint('rowHash: ${query.rowHash}');
 
-    while (currentRelation != null && depth < maxDepth) {
-      final kind = currentRelation['kind'] as String?;
-      debugPrint('  Depth $depth: $kind');
+    // Step 2a: Get schema to determine row count
+    final qtSchema = await _serviceFactory.tableSchemaService.get(qtHash);
+    final nRows = qtSchema.nRows;
+    debugPrint('✓ Schema nRows: $nRows');
+    debugPrint('  Schema columns: ${qtSchema.columns.map((c) => c.name).toList()}');
 
-      if (kind == 'InMemoryRelation' && currentRelation['inMemoryTable'] != null) {
-        debugPrint('✓ Found InMemoryTable at depth $depth');
-        break;
-      }
-
-      // Navigate deeper through wrappers
-      if (currentRelation['relation'] != null) {
-        currentRelation = currentRelation['relation'] as Map?;
-      } else if (kind == 'CompositeRelation' && currentRelation['mainRelation'] != null) {
-        currentRelation = currentRelation['mainRelation'] as Map?;
-      } else if (kind == 'GatherRelation' && currentRelation['relation'] != null) {
-        currentRelation = currentRelation['relation'] as Map?;
-      } else {
-        break;
-      }
-
-      depth++;
+    if (nRows == 0) {
+      throw Exception('Cross-tab table has 0 rows');
     }
 
-    if (currentRelation == null || currentRelation['inMemoryTable'] == null) {
-      throw Exception('Could not find InMemoryTable in relation hierarchy (max depth: $maxDepth)');
-    }
+    // Step 2b: Fetch .y, .ri, .ci from the cross-tab data table
+    debugPrint('Fetching .y, .ri, .ci from qtHash ($nRows rows)...');
+    final qtData = await _serviceFactory.tableSchemaService.select(
+      qtHash, ['.y', '.ri', '.ci'], 0, nRows,
+    );
 
-    // Extract columns from InMemoryTable
-    final inMemoryTable = currentRelation['inMemoryTable'] as Map;
-    final columns = inMemoryTable['columns'] as List?;
-
-    if (columns == null || columns.isEmpty) {
-      throw Exception('InMemoryTable has no columns');
-    }
-
-    debugPrint('✓ Found ${columns.length} columns in InMemoryTable');
-
-    // Extract required columns
     List<double>? yValues;
     List<dynamic>? riValues;
     List<dynamic>? ciValues;
-    List<String>? supergroupValues;
-    List<String>? groupValues;
 
-    for (final col in columns) {
-      final colMap = col as Map;
-      final name = colMap['name'] as String?;
-      final values = colMap['values'] as List?;
+    for (final col in qtData.columns) {
+      final values = col.values as List?;
+      if (values == null || values.isEmpty) continue;
 
-      if (name == null || values == null) continue;
-
-      if (name == '.y') {
-        yValues = values.cast<double>();
-        debugPrint('✓ Extracted .y: ${yValues.length} values');
-      } else if (name == '.ri') {
-        riValues = values;
-        debugPrint('✓ Extracted .ri: ${riValues.length} values');
-      } else if (name == '.ci') {
-        ciValues = values;
-        debugPrint('✓ Extracted .ci: ${ciValues.length} values');
-      } else if (name.startsWith('js') && values.isNotEmpty) {
-        // User columns (non-dot-prefixed)
-        // Try to identify supergroup and group columns
-        // For now, we'll use a heuristic: first user column is supergroup, second is group
-        if (supergroupValues == null) {
-          supergroupValues = values.map((v) => v?.toString() ?? '').toList();
-          debugPrint('✓ Extracted supergroup column "$name": ${supergroupValues.length} values');
-        } else if (groupValues == null) {
-          groupValues = values.map((v) => v?.toString() ?? '').toList();
-          debugPrint('✓ Extracted group column "$name": ${groupValues.length} values');
-        }
+      switch (col.name) {
+        case '.y':
+          yValues = values.map((v) => (v as num).toDouble()).toList();
+          debugPrint('✓ Fetched .y: ${yValues.length} values');
+          break;
+        case '.ri':
+          riValues = List.from(values);
+          debugPrint('✓ Fetched .ri: ${riValues.length} values');
+          break;
+        case '.ci':
+          ciValues = List.from(values);
+          debugPrint('✓ Fetched .ci: ${ciValues.length} values');
+          break;
       }
     }
 
-    // Validate required columns
-    if (yValues == null) {
-      throw Exception('Required column .y not found');
-    }
-    if (riValues == null) {
-      throw Exception('Required column .ri not found');
-    }
-    if (ciValues == null) {
-      throw Exception('Required column .ci not found');
+    if (yValues == null) throw Exception('.y column not returned by select');
+    if (riValues == null) throw Exception('.ri column not returned by select');
+    if (ciValues == null) throw Exception('.ci column not returned by select');
+
+    // Promote to non-nullable locals for use in closures
+    final yVals = yValues;
+    final ciVals = ciValues;
+
+    // Step 2c: Fetch column table to resolve .ci → group/supergroup labels
+    final columnHash = query.columnHash;
+    List<String> supergroupValues;
+    List<String> groupValues;
+
+    if (columnHash.isNotEmpty) {
+      final colSchema = await _serviceFactory.tableSchemaService.get(columnHash);
+      final nCols = colSchema.nRows;
+      debugPrint('✓ Column table: $nCols entries');
+
+      // Find user-defined factor columns (non-dot-prefixed)
+      final factorNames = colSchema.columns
+          .map((c) => c.name)
+          .where((name) => !name.startsWith('.'))
+          .toList();
+      debugPrint('  Factor columns: $factorNames');
+
+      if (factorNames.isNotEmpty && nCols > 0) {
+        final colData = await _serviceFactory.tableSchemaService.select(
+          columnHash, factorNames, 0, nCols,
+        );
+
+        // Build map: ci index → {factorName: value}
+        final Map<int, Map<String, String>> ciLabelMap = {};
+        for (int ci = 0; ci < nCols; ci++) {
+          ciLabelMap[ci] = {};
+        }
+        for (final col in colData.columns) {
+          final vals = col.values as List?;
+          if (vals == null) continue;
+          for (int i = 0; i < vals.length; i++) {
+            ciLabelMap[i]![col.name] = vals[i]?.toString() ?? '';
+          }
+        }
+
+        debugPrint('  Label map: $ciLabelMap');
+
+        // Map each data point's .ci to supergroup and group labels
+        // If 2+ factors: first is supergroup, rest combined as group
+        // If 1 factor: that's the group, supergroup is 'Default'
+        if (factorNames.length >= 2) {
+          final sgFactor = factorNames[0];
+          final grpFactors = factorNames.sublist(1);
+          debugPrint('  Supergroup factor: $sgFactor');
+          debugPrint('  Group factors: $grpFactors');
+
+          supergroupValues = List.generate(yVals.length, (i) {
+            final ci = _toInt(ciVals[i]);
+            return ciLabelMap[ci]?[sgFactor] ?? 'Default';
+          });
+          groupValues = List.generate(yVals.length, (i) {
+            final ci = _toInt(ciVals[i]);
+            final labels = ciLabelMap[ci] ?? {};
+            return grpFactors.map((f) => labels[f] ?? '').join('.');
+          });
+        } else {
+          supergroupValues = List.filled(yVals.length, 'Default');
+          groupValues = List.generate(yVals.length, (i) {
+            final ci = _toInt(ciVals[i]);
+            return ciLabelMap[ci]?[factorNames[0]] ?? 'Group$ci';
+          });
+        }
+      } else {
+        debugPrint('⚠ No factor columns in column table, using .ci as labels');
+        supergroupValues = List.filled(yVals.length, 'Default');
+        groupValues = List.generate(yVals.length, (i) {
+          return 'Group${_toInt(ciVals[i])}';
+        });
+      }
+    } else {
+      debugPrint('⚠ No columnHash, using defaults');
+      supergroupValues = List.filled(yVals.length, 'Default');
+      groupValues = List.filled(yVals.length, 'Group1');
     }
 
-    // If no user columns found, create defaults
-    if (supergroupValues == null) {
-      debugPrint('⚠ No supergroup column found, using default');
-      supergroupValues = List.filled(yValues.length, 'Default');
-    }
-    if (groupValues == null) {
-      debugPrint('⚠ No group column found, using default');
-      groupValues = List.filled(yValues.length, 'Group1');
-    }
-
-    // Validate lengths match
-    if (yValues.length != riValues.length ||
-        yValues.length != ciValues.length ||
-        yValues.length != supergroupValues.length ||
-        yValues.length != groupValues.length) {
-      throw Exception(
-        'Column length mismatch: .y=${yValues.length}, .ri=${riValues.length}, '
-        '.ci=${ciValues.length}, supergroups=${supergroupValues.length}, groups=${groupValues.length}'
-      );
-    }
+    debugPrint('✓ Data extraction complete: ${yVals.length} data points');
 
     return _ExtractedData(
       yValues: yValues,
@@ -237,6 +252,12 @@ class TercenDataService {
       supergroupValues: supergroupValues,
       groupValues: groupValues,
     );
+  }
+
+  int _toInt(dynamic v) {
+    if (v is int) return v;
+    if (v is double) return v.toInt();
+    return int.parse(v.toString());
   }
 
   /// Build grid data structure from extracted data

@@ -8,14 +8,21 @@ import 'package:web/web.dart' as web;
 
 /// Service for exporting chart content as PNG or PDF.
 /// Uses RepaintBoundary capture + browser download via package:web.
+///
+/// Export dimensions are per-pane: a 600×400 setting with a 2×3 grid
+/// produces an image approximately 1200px wide × scaled height,
+/// where each chart pane is ~600px wide in the output.
 class ExportService {
-  /// Capture a RepaintBoundary as PNG bytes at the given export width.
-  /// Height scales proportionally to preserve aspect ratio.
+  /// Capture a RepaintBoundary as PNG bytes, scaled so each chart pane
+  /// is [perPaneWidth] pixels wide in the output image.
   static Future<Uint8List?> capturePng(
-    RenderRepaintBoundary boundary,
-    int exportWidth,
-  ) async {
-    final pixelRatio = exportWidth / boundary.size.width;
+    RenderRepaintBoundary boundary, {
+    required int perPaneWidth,
+    required int nColumns,
+  }) async {
+    // Scale so that each pane column is perPaneWidth pixels in the output.
+    // The boundary renders the full grid, so total target width ≈ nColumns * perPaneWidth.
+    final pixelRatio = (nColumns * perPaneWidth) / boundary.size.width;
     final image = await boundary.toImage(pixelRatio: pixelRatio);
     final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
     if (byteData == null) return null;
@@ -24,25 +31,35 @@ class ExportService {
 
   /// Export as PNG: capture boundary and trigger browser download.
   static Future<void> exportPng(
-    RenderRepaintBoundary boundary,
-    int exportWidth,
-  ) async {
-    final pngBytes = await capturePng(boundary, exportWidth);
+    RenderRepaintBoundary boundary, {
+    required int perPaneWidth,
+    required int nColumns,
+  }) async {
+    final pngBytes = await capturePng(
+      boundary,
+      perPaneWidth: perPaneWidth,
+      nColumns: nColumns,
+    );
     if (pngBytes == null) return;
     _triggerDownload(pngBytes, 'mean_variance_chart.png', 'image/png');
   }
 
   /// Export as PDF: capture boundary as PNG, embed in a PDF page, download.
   static Future<void> exportPdf(
-    RenderRepaintBoundary boundary,
-    int exportWidth,
-  ) async {
-    final pngBytes = await capturePng(boundary, exportWidth);
+    RenderRepaintBoundary boundary, {
+    required int perPaneWidth,
+    required int nColumns,
+  }) async {
+    final pngBytes = await capturePng(
+      boundary,
+      perPaneWidth: perPaneWidth,
+      nColumns: nColumns,
+    );
     if (pngBytes == null) return;
 
-    // Calculate dimensions preserving aspect ratio
+    // Calculate PDF page dimensions preserving aspect ratio
     final aspectRatio = boundary.size.height / boundary.size.width;
-    final pdfWidth = exportWidth.toDouble();
+    final pdfWidth = (nColumns * perPaneWidth).toDouble();
     final pdfHeight = pdfWidth * aspectRatio;
 
     final pdf = pw.Document();

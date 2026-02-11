@@ -21,6 +21,10 @@ class _MeanAndCvScreenState extends State<MeanAndCvScreen> {
   // RepaintBoundary key for export capture
   final _repaintBoundaryKey = GlobalKey();
 
+  // Grid dimensions reported by MainContent (for per-pane export sizing)
+  int _nSupergroups = 1;
+  int _nGroups = 1;
+
   // Control state
   String _chartTitle = '';
   String _plotType = 'CV';
@@ -46,18 +50,29 @@ class _MeanAndCvScreenState extends State<MeanAndCvScreen> {
     });
   }
 
+  /// Number of chart columns in the current view
+  int get _exportColumns => _combineGroups ? 1 : _nGroups;
+
   Future<void> _exportPng() async {
     final boundary = _repaintBoundaryKey.currentContext?.findRenderObject()
         as RenderRepaintBoundary?;
     if (boundary == null) return;
-    await ExportService.exportPng(boundary, _exportWidth);
+    await ExportService.exportPng(
+      boundary,
+      perPaneWidth: _exportWidth,
+      nColumns: _exportColumns,
+    );
   }
 
   Future<void> _exportPdf() async {
     final boundary = _repaintBoundaryKey.currentContext?.findRenderObject()
         as RenderRepaintBoundary?;
     if (boundary == null) return;
-    await ExportService.exportPdf(boundary, _exportWidth);
+    await ExportService.exportPdf(
+      boundary,
+      perPaneWidth: _exportWidth,
+      nColumns: _exportColumns,
+    );
   }
 
   @override
@@ -131,6 +146,10 @@ class _MeanAndCvScreenState extends State<MeanAndCvScreen> {
                     lowThreshold: _lowSignalThreshold,
                     highThreshold: _highSignalThreshold,
                     repaintBoundaryKey: _repaintBoundaryKey,
+                    onGridDimensions: (nSupergroups, nGroups) {
+                      _nSupergroups = nSupergroups;
+                      _nGroups = nGroups;
+                    },
                   ),
                 ),
               ],

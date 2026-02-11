@@ -25,6 +25,7 @@ class MainContent extends StatefulWidget {
   final double lowThreshold;
   final double highThreshold;
   final GlobalKey? repaintBoundaryKey;
+  final void Function(int nSupergroups, int nGroups)? onGridDimensions;
 
   const MainContent({
     super.key,
@@ -40,6 +41,7 @@ class MainContent extends StatefulWidget {
     this.lowThreshold = 100.0,
     this.highThreshold = 1000.0,
     this.repaintBoundaryKey,
+    this.onGridDimensions,
   });
 
   @override
@@ -179,6 +181,16 @@ class _MainContentState extends State<MainContent> {
 
           // Apply model fitting with current thresholds (cached until they change)
           final dataset = _getOrApplyFitting(snapshot.data!);
+
+          // Report grid dimensions to parent for export sizing
+          if (widget.onGridDimensions != null) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              widget.onGridDimensions!(
+                dataset.nSupergroups,
+                dataset.nGroups,
+              );
+            });
+          }
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(AppSpacing.md),

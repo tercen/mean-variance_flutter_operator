@@ -64,7 +64,7 @@ class ChartData {
     this.fitCurve,
   });
 
-  String get paneKey => '$supergroup.$testCondition';
+  String get paneKey => '$testCondition.$supergroup';
   String get group => testCondition; // Alias for clarity
 }
 
@@ -101,7 +101,7 @@ class TercenDataset {
   List<String> getGroupsOrdered() => getTestConditionsOrdered();
 
   ChartData? getChartData(String supergroup, String testCondition) {
-    return chartData['$supergroup.$testCondition'];
+    return chartData['$testCondition.$supergroup'];
   }
 
   // Grid dimensions

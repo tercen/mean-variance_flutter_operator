@@ -4,17 +4,20 @@ import '../../domain/models/tercen_data.dart';
 
 /// Service for fitting two-component error model
 ///
-/// Algorithm from Shiny version:
-/// variance = sigma0² + (CV1 × mean)²
+/// Matches the Shiny R implementation:
+///   variance = ssq0 + ssq1 × mean²
 ///
 /// Where:
-/// - sigma0: Low signal noise (constant variance term)
-/// - CV1: High signal coefficient of variation (proportional term)
-/// - SNR: Signal-to-noise ratio = 1 / CV1
+/// - ssq0: Low signal variance (Poisson/constant component)
+/// - ssq1: High signal proportional variance (CV² component)
+/// - cvFit = sqrt(ssq1 + ssq0/mean²)
+/// - sdFit = sqrt(ssq1 × mean² + ssq0)
+/// - snrFit = -10 × log10(cvFit)
+///
+/// Thresholds (pLow, pHigh) are QUANTILES of the mean distribution,
+/// not absolute values.
 class ModelFittingService {
   /// Fit model to chart data
-  ///
-  /// Returns updated ChartData with fit results
   ChartData fitModel({
     required ChartData chartData,
     required double lowThreshold,
@@ -25,46 +28,177 @@ class ModelFittingService {
       debugPrint('FITTING MODEL: ${chartData.paneKey}');
       debugPrint('--------------------------------');
       debugPrint('Points: ${chartData.points.length}');
-      debugPrint('Low threshold: $lowThreshold');
-      debugPrint('High threshold: $highThreshold');
+      debugPrint('pLow quantile: $lowThreshold');
+      debugPrint('pHigh quantile: $highThreshold');
 
-      // Step 1: Classify points
-      final classifiedPoints = _classifyPoints(
-        chartData.points,
-        lowThreshold,
-        highThreshold,
-      );
-
-      // Step 2: Initialize parameters
-      final initialParams = _initializeParameters(classifiedPoints);
-
-      if (initialParams == null) {
-        debugPrint('⚠ Could not initialize parameters');
-        return chartData.copyWith(points: classifiedPoints);
+      final points = chartData.points;
+      if (points.length < 3) {
+        debugPrint('⚠ Not enough points for fitting');
+        return chartData;
       }
 
-      debugPrint('Initial σ₀: ${initialParams.sigma0.toStringAsFixed(4)}');
-      debugPrint('Initial CV₁: ${initialParams.cv1.toStringAsFixed(4)}');
+      // Step 1: Compute quantile thresholds from mean distribution
+      final sortedMeans = points.map((p) => p.mean).toList()..sort();
+      final lowMeanThreshold = _quantile(sortedMeans, lowThreshold);
+      final highMeanThreshold = _quantile(sortedMeans, highThreshold);
 
-      // Step 3: Iterative fitting
-      final fitResult = _iterativeFit(
-        classifiedPoints,
-        initialParams.sigma0,
-        initialParams.cv1,
-      );
+      debugPrint('Mean range: ${sortedMeans.first.toStringAsFixed(2)} - ${sortedMeans.last.toStringAsFixed(2)}');
+      debugPrint('Low threshold (${lowThreshold} quantile): ${lowMeanThreshold.toStringAsFixed(2)}');
+      debugPrint('High threshold (${highThreshold} quantile): ${highMeanThreshold.toStringAsFixed(2)}');
 
-      debugPrint('Final σ₀: ${fitResult.sigma0.toStringAsFixed(4)}');
-      debugPrint('Final CV₁: ${fitResult.cv1.toStringAsFixed(4)}');
-      debugPrint('SNR: ${fitResult.snr.toStringAsFixed(2)}');
-      debugPrint('Converged: ${fitResult.converged}');
-      debugPrint('Iterations: ${fitResult.iterations}');
+      // Step 2: Initial classification
+      var bLow = points.map((p) => p.mean <= lowMeanThreshold).toList();
+      var bHigh = points.map((p) => p.mean >= highMeanThreshold).toList();
 
-      // Step 4: Generate fit curve
-      final fitCurve = _generateFitCurve(
-        classifiedPoints,
-        fitResult.sigma0,
-        fitResult.cv1,
-      );
+      final lowCount = bLow.where((b) => b).length;
+      final highCount = bHigh.where((b) => b).length;
+      debugPrint('Initial classification: $lowCount low, ${points.length - lowCount - highCount} mid, $highCount high');
+
+      // Step 3: Iterative fitting (matching Shiny's cvmodel function)
+      double ssq0 = double.nan;
+      double ssq1 = double.nan;
+      int iter = 0;
+      const maxIter = 25;
+      var bModel = List.generate(points.length, (i) => bLow[i] || bHigh[i]);
+
+      try {
+        while (bModel.any((b) => b)) {
+          // Calculate pooled variance for low-signal spots
+          final lowVars = <double>[];
+          final lowNs = <int>[];
+          for (int i = 0; i < points.length; i++) {
+            if (bLow[i]) {
+              lowVars.add(points[i].sd * points[i].sd); // variance = sd²
+              lowNs.add(points[i].n);
+            }
+          }
+
+          if (lowVars.isEmpty || lowNs.isEmpty) {
+            ssq0 = double.nan;
+            ssq1 = double.nan;
+            break;
+          }
+
+          ssq0 = _pooledVarEst(lowVars, lowNs);
+
+          // Calculate ssq1 from high-signal spots using log-variance
+          // lvar = var(log(values)) per group, approximated as log(1 + CV²)
+          final highLvars = <double>[];
+          for (int i = 0; i < points.length; i++) {
+            if (bHigh[i] && points[i].mean > 0) {
+              final cv = points[i].sd / points[i].mean;
+              final lvar = log(1 + cv * cv);
+              if (lvar.isFinite) highLvars.add(lvar);
+            }
+          }
+
+          if (highLvars.isEmpty) {
+            ssq0 = double.nan;
+            ssq1 = double.nan;
+            break;
+          }
+
+          highLvars.sort();
+          final lssq1 = _median(highLvars);
+          ssq1 = exp(lssq1) - 1;
+          if (ssq1 < 0) ssq1 = 0;
+
+          // Calculate presence values and reclassify
+          final newBLow = List<bool>.filled(points.length, false);
+          final newBHigh = List<bool>.filled(points.length, false);
+
+          for (int i = 0; i < points.length; i++) {
+            final m = max(0.0, points[i].mean);
+            final propComponent = sqrt(ssq1) * m;
+            final constComponent = sqrt(ssq0);
+            final denom = propComponent + constComponent;
+            final presence = denom > 0 ? propComponent / denom : 0.0;
+
+            newBLow[i] = presence < lowThreshold;
+            newBHigh[i] = presence > highThreshold;
+          }
+
+          // Check if all points are one class (degenerate case)
+          if (newBLow.every((b) => !b) || newBHigh.every((b) => !b)) {
+            ssq0 = double.nan;
+            ssq1 = double.nan;
+            break;
+          }
+
+          // Check convergence
+          final newBModel = List.generate(
+            points.length, (i) => newBLow[i] || newBHigh[i]);
+
+          bool converged = true;
+          for (int i = 0; i < points.length; i++) {
+            if (newBModel[i] != bModel[i]) {
+              converged = false;
+              break;
+            }
+          }
+
+          if (converged) {
+            bLow = newBLow;
+            bHigh = newBHigh;
+            break;
+          }
+
+          bLow = newBLow;
+          bHigh = newBHigh;
+          bModel = newBModel;
+          iter++;
+
+          if (iter > maxIter) break;
+        }
+      } catch (e) {
+        debugPrint('⚠ Error during iterative fitting: $e');
+        ssq0 = double.nan;
+        ssq1 = double.nan;
+      }
+
+      debugPrint('Final ssq0: ${ssq0.isNaN ? "NaN" : ssq0.toStringAsFixed(4)}');
+      debugPrint('Final ssq1: ${ssq1.isNaN ? "NaN" : ssq1.toStringAsFixed(6)}');
+      debugPrint('Iterations: $iter');
+
+      // Step 4: Generate classified points and fit curve
+      final classifiedPoints = <TercenDataPoint>[];
+      for (int i = 0; i < points.length; i++) {
+        classifiedPoints.add(TercenDataPoint(
+          x: points[i].x,
+          y: points[i].y,
+          rowIndex: points[i].rowIndex,
+          colorIndex: points[i].colorIndex,
+          testCondition: points[i].testCondition,
+          supergroup: points[i].supergroup,
+          rowId: points[i].rowId,
+          sd: points[i].sd,
+          n: points[i].n,
+          bLow: bLow[i],
+          bHigh: bHigh[i],
+        ));
+      }
+
+      List<TercenDataPoint>? fitCurve;
+      double? sigma0Val;
+      double? cv1Val;
+      double? snrVal;
+      bool didConverge = false;
+
+      if (!ssq0.isNaN && !ssq1.isNaN) {
+        sigma0Val = sqrt(ssq0);
+        cv1Val = sqrt(ssq1);
+        snrVal = ssq1 > 0 ? 1.0 / sqrt(ssq1) : 0.0;
+        didConverge = true;
+
+        debugPrint('σ₀ (sqrt(ssq0)): ${sigma0Val.toStringAsFixed(4)}');
+        debugPrint('CV₁ (sqrt(ssq1)): ${cv1Val.toStringAsFixed(6)}');
+        debugPrint('SNR (1/CV₁): ${snrVal.toStringAsFixed(2)}');
+
+        fitCurve = _generateFitCurve(points, ssq0, ssq1);
+        debugPrint('Fit curve: ${fitCurve.length} points');
+      } else {
+        debugPrint('⚠ Model did not converge - no fit curve');
+      }
 
       return ChartData(
         supergroup: chartData.supergroup,
@@ -74,10 +208,10 @@ class ModelFittingService {
         maxX: chartData.maxX,
         minY: chartData.minY,
         maxY: chartData.maxY,
-        sigma0: fitResult.sigma0,
-        cv1: fitResult.cv1,
-        snr: fitResult.snr,
-        converged: fitResult.converged,
+        sigma0: sigma0Val,
+        cv1: cv1Val,
+        snr: snrVal,
+        converged: didConverge,
         fitCurve: fitCurve,
       );
     } catch (e, stackTrace) {
@@ -87,215 +221,33 @@ class ModelFittingService {
     }
   }
 
-  /// Classify points by thresholds
-  List<TercenDataPoint> _classifyPoints(
-    List<TercenDataPoint> points,
-    double lowThreshold,
-    double highThreshold,
-  ) {
-    final classified = <TercenDataPoint>[];
+  /// Pooled variance estimate (matching R's pooledVarEst)
+  /// est = sum(s2 * (n-1)) / (sum(n) - length(n))
+  double _pooledVarEst(List<double> variances, List<int> ns) {
+    double numerator = 0;
+    int totalN = 0;
+    int count = 0;
 
-    for (final point in points) {
-      final bLow = point.mean < lowThreshold;
-      final bHigh = point.mean > highThreshold;
-
-      classified.add(TercenDataPoint(
-        x: point.x,
-        y: point.y,
-        rowIndex: point.rowIndex,
-        colorIndex: point.colorIndex,
-        testCondition: point.testCondition,
-        supergroup: point.supergroup,
-        rowId: point.rowId,
-        sd: point.sd,
-        n: point.n,
-        bLow: bLow,
-        bHigh: bHigh,
-      ));
-    }
-
-    final lowCount = classified.where((p) => p.bLow).length;
-    final highCount = classified.where((p) => p.bHigh).length;
-    final midCount = classified.length - lowCount - highCount;
-
-    debugPrint('Classification: $lowCount low, $midCount mid, $highCount high');
-
-    return classified;
-  }
-
-  /// Initialize parameters from data
-  _InitialParams? _initializeParameters(List<TercenDataPoint> points) {
-    final lowPoints = points.where((p) => p.bLow).toList();
-    final highPoints = points.where((p) => p.bHigh).toList();
-
-    // Calculate sigma0 from low signal points (median SD)
-    double sigma0;
-    if (lowPoints.isNotEmpty) {
-      final sds = lowPoints.map((p) => p.sd).toList()..sort();
-      sigma0 = _median(sds);
-    } else {
-      // No low points, use minimum SD
-      if (points.isEmpty) return null;
-      sigma0 = points.map((p) => p.sd).reduce((a, b) => a < b ? a : b);
-    }
-
-    // Calculate CV1 from high signal points (median CV)
-    double cv1;
-    if (highPoints.isNotEmpty) {
-      final cvs = highPoints.map((p) => p.sd / p.mean).toList()..sort();
-      cv1 = _median(cvs);
-    } else {
-      // No high points, use median CV of all points
-      if (points.isEmpty) return null;
-      final cvs = points.map((p) => p.sd / p.mean).toList()..sort();
-      cv1 = _median(cvs);
-    }
-
-    // Ensure reasonable bounds
-    if (sigma0 < 0) sigma0 = 0;
-    if (cv1 < 0) cv1 = 0.01;
-    if (!sigma0.isFinite) sigma0 = 0;
-    if (!cv1.isFinite) cv1 = 0.01;
-
-    return _InitialParams(sigma0: sigma0, cv1: cv1);
-  }
-
-  /// Iterative fitting with weighted least squares
-  _FitResult _iterativeFit(
-    List<TercenDataPoint> points,
-    double initialSigma0,
-    double initialCv1,
-  ) {
-    double sigma0 = initialSigma0;
-    double cv1 = initialCv1;
-    bool converged = false;
-    int iterations = 0;
-    const maxIterations = 25;
-    const convergenceThreshold = 0.001;
-
-    for (int iter = 0; iter < maxIterations; iter++) {
-      iterations = iter + 1;
-
-      // Calculate expected variance for each point
-      final weights = <double>[];
-      final logMeans = <double>[];
-      final logSds = <double>[];
-
-      for (final point in points) {
-        final mean = point.mean;
-        final sd = point.sd;
-
-        if (mean <= 0 || sd <= 0) continue;
-
-        // Expected variance: sigma0² + (CV1 × mean)²
-        final expectedVar = pow(sigma0, 2) + pow(cv1 * mean, 2);
-
-        if (expectedVar <= 0) continue;
-
-        // Weight = 1 / expected variance
-        final weight = 1.0 / expectedVar;
-
-        weights.add(weight);
-        logMeans.add(log(mean));
-        logSds.add(log(sd));
+    for (int i = 0; i < variances.length; i++) {
+      final n = ns[i];
+      if (n > 1 && variances[i].isFinite) {
+        numerator += variances[i] * (n - 1);
+        totalN += n;
+        count++;
       }
-
-      if (weights.length < 2) {
-        // Not enough points for fitting
-        break;
-      }
-
-      // Weighted least squares: log(SD) ~ log(mean)
-      final fit = _weightedLinearRegression(logMeans, logSds, weights);
-
-      if (fit == null) break;
-
-      // Extract new parameters from fit
-      // Model: log(SD) = log(sqrt(sigma0² + (CV1×mean)²))
-      // Approximation: log(SD) ≈ intercept + slope × log(mean)
-      // For large means: log(SD) ≈ log(CV1) + log(mean)
-      // So: slope ≈ 1, intercept ≈ log(CV1)
-
-      final newSigma0 = exp(fit.intercept);
-      final newCv1 = exp(fit.intercept) * exp(fit.slope);
-
-      // Check convergence
-      final deltaSigma0 = (newSigma0 - sigma0).abs();
-      final deltaCv1 = (newCv1 - cv1).abs();
-
-      if (deltaSigma0 < convergenceThreshold && deltaCv1 < convergenceThreshold) {
-        converged = true;
-        sigma0 = newSigma0;
-        cv1 = newCv1;
-        break;
-      }
-
-      sigma0 = newSigma0;
-      cv1 = newCv1;
-
-      // Ensure reasonable bounds
-      if (!sigma0.isFinite || sigma0 < 0) sigma0 = initialSigma0;
-      if (!cv1.isFinite || cv1 < 0) cv1 = initialCv1;
     }
 
-    final snr = cv1 > 0 ? 1.0 / cv1 : 0.0;
-
-    return _FitResult(
-      sigma0: sigma0,
-      cv1: cv1,
-      snr: snr,
-      converged: converged,
-      iterations: iterations,
-    );
+    final denom = totalN - count;
+    if (denom <= 0) return 0;
+    return numerator / denom;
   }
 
-  /// Weighted linear regression
-  _LinearFit? _weightedLinearRegression(
-    List<double> x,
-    List<double> y,
-    List<double> weights,
-  ) {
-    if (x.length != y.length || x.length != weights.length || x.length < 2) {
-      return null;
-    }
-
-    // Calculate weighted sums
-    double sumW = 0;
-    double sumWX = 0;
-    double sumWY = 0;
-    double sumWXX = 0;
-    double sumWXY = 0;
-
-    for (int i = 0; i < x.length; i++) {
-      final w = weights[i];
-      final xi = x[i];
-      final yi = y[i];
-
-      sumW += w;
-      sumWX += w * xi;
-      sumWY += w * yi;
-      sumWXX += w * xi * xi;
-      sumWXY += w * xi * yi;
-    }
-
-    // Calculate slope and intercept
-    final denominator = sumW * sumWXX - sumWX * sumWX;
-
-    if (denominator.abs() < 1e-10) {
-      return null;
-    }
-
-    final slope = (sumW * sumWXY - sumWX * sumWY) / denominator;
-    final intercept = (sumWY - slope * sumWX) / sumW;
-
-    return _LinearFit(slope: slope, intercept: intercept);
-  }
-
-  /// Generate fit curve points
+  /// Generate fit curve using the two-component model
+  /// sdFit = sqrt(ssq1 × mean² + ssq0)
   List<TercenDataPoint> _generateFitCurve(
     List<TercenDataPoint> points,
-    double sigma0,
-    double cv1,
+    double ssq0,
+    double ssq1,
   ) {
     if (points.isEmpty) return [];
 
@@ -303,24 +255,23 @@ class ModelFittingService {
     final minMean = means.reduce((a, b) => a < b ? a : b);
     final maxMean = means.reduce((a, b) => a > b ? a : b);
 
-    if (minMean <= 0 || maxMean <= 0 || minMean >= maxMean) {
-      return [];
-    }
+    if (maxMean <= 0 || minMean >= maxMean) return [];
 
-    // Generate 100 points from min to max
-    const nPoints = 100;
+    // Use positive range
+    final startMean = max(0.001, minMean);
+    const nPoints = 200;
     final curve = <TercenDataPoint>[];
 
     for (int i = 0; i < nPoints; i++) {
       final t = i / (nPoints - 1);
-      final mean = minMean + t * (maxMean - minMean);
+      final mean = startMean + t * (maxMean - startMean);
 
-      // Calculate SD from model: sd = sqrt(sigma0² + (CV1 × mean)²)
-      final sd = sqrt(pow(sigma0, 2) + pow(cv1 * mean, 2));
+      // sdFit = sqrt(ssq1 × mean² + ssq0)
+      final sd = sqrt(ssq1 * mean * mean + ssq0);
 
       curve.add(TercenDataPoint(
         x: mean,
-        y: sd, // Will be transformed based on plot type later
+        y: sd,
         rowIndex: i,
         colorIndex: 0,
         testCondition: '',
@@ -336,7 +287,25 @@ class ModelFittingService {
     return curve;
   }
 
-  /// Calculate median of a sorted list
+  /// Quantile function (matching R's quantile with default type=7)
+  double _quantile(List<double> sortedValues, double p) {
+    if (sortedValues.isEmpty) return 0;
+    if (sortedValues.length == 1) return sortedValues[0];
+
+    final n = sortedValues.length;
+    final index = (n - 1) * p;
+    final lo = index.floor();
+    final hi = index.ceil();
+    final frac = index - lo;
+
+    if (lo == hi || hi >= n) {
+      return sortedValues[min(lo, n - 1)];
+    }
+
+    return sortedValues[lo] * (1 - frac) + sortedValues[hi] * frac;
+  }
+
+  /// Median of a sorted list
   double _median(List<double> sortedValues) {
     if (sortedValues.isEmpty) return 0;
 
@@ -346,65 +315,5 @@ class ModelFittingService {
     } else {
       return (sortedValues[n ~/ 2 - 1] + sortedValues[n ~/ 2]) / 2;
     }
-  }
-}
-
-/// Initial parameter estimates
-class _InitialParams {
-  final double sigma0;
-  final double cv1;
-
-  _InitialParams({required this.sigma0, required this.cv1});
-}
-
-/// Fit result
-class _FitResult {
-  final double sigma0;
-  final double cv1;
-  final double snr;
-  final bool converged;
-  final int iterations;
-
-  _FitResult({
-    required this.sigma0,
-    required this.cv1,
-    required this.snr,
-    required this.converged,
-    required this.iterations,
-  });
-}
-
-/// Linear fit result
-class _LinearFit {
-  final double slope;
-  final double intercept;
-
-  _LinearFit({required this.slope, required this.intercept});
-}
-
-/// Extension to add copyWith to ChartData
-extension ChartDataExtension on ChartData {
-  ChartData copyWith({
-    List<TercenDataPoint>? points,
-    double? sigma0,
-    double? cv1,
-    double? snr,
-    bool? converged,
-    List<TercenDataPoint>? fitCurve,
-  }) {
-    return ChartData(
-      supergroup: supergroup,
-      testCondition: testCondition,
-      points: points ?? this.points,
-      minX: minX,
-      maxX: maxX,
-      minY: minY,
-      maxY: maxY,
-      sigma0: sigma0 ?? this.sigma0,
-      cv1: cv1 ?? this.cv1,
-      snr: snr ?? this.snr,
-      converged: converged ?? this.converged,
-      fitCurve: fitCurve ?? this.fitCurve,
-    );
   }
 }

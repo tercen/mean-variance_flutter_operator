@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_colors_dark.dart';
@@ -379,18 +380,62 @@ class _MainContentState extends State<MainContent> {
     );
   }
 
+  /// Compute transformed Y-axis range matching the chart painter's transform
+  ({double minY, double maxY}) _computeTransformedYRange(ChartData chartData) {
+    final transformedYs = <double>[];
+    for (final p in chartData.points) {
+      double y;
+      if (widget.plotType == 'CV') {
+        y = p.mean > 0 ? p.sd / p.mean : 0;
+      } else if (widget.plotType == 'SNR') {
+        y = p.sd > 0 ? p.mean / p.sd : 0;
+      } else {
+        y = p.sd;
+      }
+      if (y.isFinite && y >= 0) transformedYs.add(y);
+    }
+    if (transformedYs.isEmpty) return (minY: 0.0, maxY: 1.0);
+    final minY = transformedYs.reduce((a, b) => a < b ? a : b);
+    final maxY = transformedYs.reduce((a, b) => a > b ? a : b);
+    final pad = (maxY - minY) * 0.05;
+    return (minY: max(0, minY - pad), maxY: maxY + pad);
+  }
+
+  /// Compute transformed X-axis range
+  ({double minX, double maxX}) _computeTransformedXRange(ChartData chartData) {
+    final transformedXs = <double>[];
+    for (final p in chartData.points) {
+      double x = p.mean;
+      if (widget.logXAxis) {
+        if (x > 0) {
+          x = log(x) / ln10;
+        } else {
+          continue;
+        }
+      }
+      if (x.isFinite) transformedXs.add(x);
+    }
+    if (transformedXs.isEmpty) return (minX: 0.0, maxX: 1.0);
+    final minX = transformedXs.reduce((a, b) => a < b ? a : b);
+    final maxX = transformedXs.reduce((a, b) => a > b ? a : b);
+    final pad = (maxX - minX) * 0.05;
+    return (minX: minX - pad, maxX: maxX + pad);
+  }
+
   Widget _buildYAxisLabels(ChartData chartData, Color textColor) {
-    // Show 5 evenly-spaced Y-axis labels
-    final yRange = chartData.maxY - chartData.minY;
+    final range = _computeTransformedYRange(chartData);
+    final effMinY = widget.yMin ?? range.minY;
+    final effMaxY = widget.yMax ?? range.maxY;
+    final ySpan = effMaxY - effMinY;
     final labels = <String>[];
 
     for (var i = 4; i >= 0; i--) {
-      final value = chartData.minY + (yRange * i / 4);
-      labels.add(value.toStringAsFixed(0));
+      final value = effMinY + (ySpan * i / 4);
+      labels.add(value.toStringAsFixed(ySpan < 1 ? 3 : ySpan < 10 ? 1 : 0));
     }
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 20), // Add padding to prevent overlap with X-axis
+      padding: const EdgeInsets.only(bottom: 20),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -405,13 +450,15 @@ class _MainContentState extends State<MainContent> {
   }
 
   Widget _buildXAxisLabels(ChartData chartData, Color textColor) {
-    // Show 5 evenly-spaced X-axis labels
-    final xRange = chartData.maxX - chartData.minX;
+    final range = _computeTransformedXRange(chartData);
+    final effMinX = widget.xMin ?? range.minX;
+    final effMaxX = widget.xMax ?? range.maxX;
+    final xSpan = effMaxX - effMinX;
     final labels = <String>[];
 
     for (var i = 0; i <= 4; i++) {
-      final value = chartData.minX + (xRange * i / 4);
-      labels.add(value.toStringAsFixed(2));
+      final value = effMinX + (xSpan * i / 4);
+      labels.add(value.toStringAsFixed(xSpan < 1 ? 3 : xSpan < 10 ? 1 : 0));
     }
 
     return Row(

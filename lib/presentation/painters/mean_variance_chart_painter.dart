@@ -48,8 +48,12 @@ class MeanVarianceChartPainter extends CustomPainter {
     const fitLineColor = Color(0xFFDC2626);
     const defaultBlue = Color(0xFF1E40AF);
 
-    // Draw grid
+    // Draw grid (outside clip so borders are visible)
     _drawGrid(canvas, size, gridColor);
+
+    // Clip to chart area so points outside axis range are hidden
+    canvas.save();
+    canvas.clipRect(Rect.fromLTWH(0, 0, size.width, size.height));
 
     // Transform points based on plot type
     final transformedPoints = _transformPoints(chartData.points);
@@ -64,6 +68,8 @@ class MeanVarianceChartPainter extends CustomPainter {
 
     // Draw data points
     _drawPoints(canvas, size, transformedPoints, axisRanges);
+
+    canvas.restore();
   }
 
   /// Transform points based on plot type
@@ -188,6 +194,11 @@ class MeanVarianceChartPainter extends CustomPainter {
     for (final tp in points) {
       final point = tp.point;
 
+      // Skip points outside axis range (matches ggplot2's ylim which removes data)
+      final xNorm = (tp.x - ranges.minX) / (ranges.maxX - ranges.minX);
+      final yNorm = (tp.y - ranges.minY) / (ranges.maxY - ranges.minY);
+      if (xNorm < 0 || xNorm > 1 || yNorm < 0 || yNorm > 1) continue;
+
       // Determine color
       Color pointColor;
       if (showFit) {
@@ -198,10 +209,6 @@ class MeanVarianceChartPainter extends CustomPainter {
         // All points blue when fit disabled
         pointColor = const Color(0xFF1E40AF);
       }
-
-      // Calculate canvas position
-      final xNorm = (tp.x - ranges.minX) / (ranges.maxX - ranges.minX);
-      final yNorm = (tp.y - ranges.minY) / (ranges.maxY - ranges.minY);
 
       final canvasX = size.width * xNorm;
       final canvasY = size.height * (1 - yNorm); // Flip Y

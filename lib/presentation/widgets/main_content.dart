@@ -294,7 +294,7 @@ class _MainContentState extends State<MainContent> {
             : 'Standard Deviation';
 
     return Container(
-      height: isFullWidth ? 400 : 300,
+      height: isFullWidth ? 550 : 450,
       decoration: BoxDecoration(
         color: chartBgColor,
         border: Border.all(color: borderColor),

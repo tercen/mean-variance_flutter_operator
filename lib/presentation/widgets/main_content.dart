@@ -380,25 +380,22 @@ class _MainContentState extends State<MainContent> {
     );
   }
 
-  /// Compute transformed Y-axis range matching the chart painter's transform
+  /// Compute transformed Y-axis range using Shiny's default limits:
+  /// CV: yMax=0.5, SNR: yMax=20, SD: yMax=0.25*max(mean)
   ({double minY, double maxY}) _computeTransformedYRange(ChartData chartData) {
-    final transformedYs = <double>[];
-    for (final p in chartData.points) {
-      double y;
-      if (widget.plotType == 'CV') {
-        y = p.mean > 0 ? p.sd / p.mean : 0;
-      } else if (widget.plotType == 'SNR') {
-        y = p.sd > 0 ? p.mean / p.sd : 0;
-      } else {
-        y = p.sd;
-      }
-      if (y.isFinite && y >= 0) transformedYs.add(y);
+    double defaultMaxY;
+    if (widget.plotType == 'CV') {
+      defaultMaxY = 0.5;
+    } else if (widget.plotType == 'SNR') {
+      defaultMaxY = 20;
+    } else {
+      // SD: 0.25 * max(mean)
+      final maxMean = chartData.points.isEmpty
+          ? 1.0
+          : chartData.points.map((p) => p.mean).reduce((a, b) => a > b ? a : b);
+      defaultMaxY = 0.25 * maxMean;
     }
-    if (transformedYs.isEmpty) return (minY: 0.0, maxY: 1.0);
-    final minY = transformedYs.reduce((a, b) => a < b ? a : b);
-    final maxY = transformedYs.reduce((a, b) => a > b ? a : b);
-    final pad = (maxY - minY) * 0.05;
-    return (minY: max(0, minY - pad), maxY: maxY + pad);
+    return (minY: 0.0, maxY: defaultMaxY);
   }
 
   /// Compute transformed X-axis range

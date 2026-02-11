@@ -110,32 +110,43 @@ class MeanVarianceChartPainter extends CustomPainter {
     return transformed;
   }
 
-  /// Calculate axis ranges
+  /// Calculate axis ranges using Shiny's default Y limits:
+  /// CV: yMax=0.5, SNR: yMax=20, SD: yMax=0.25*max(mean)
   _AxisRanges _calculateAxisRanges(List<_TransformedPoint> points) {
     if (points.isEmpty) {
       return _AxisRanges(minX: 0, maxX: 1, minY: 0, maxY: 1);
     }
 
-    // Use manual limits if provided
+    // X-axis: use manual limits if provided, otherwise auto from data
     double minX = xMin ?? points.map((p) => p.x).reduce((a, b) => a < b ? a : b);
     double maxX = xMax ?? points.map((p) => p.x).reduce((a, b) => a > b ? a : b);
-    double minY = yMin ?? points.map((p) => p.y).reduce((a, b) => a < b ? a : b);
-    double maxY = yMax ?? points.map((p) => p.y).reduce((a, b) => a > b ? a : b);
 
-    // Add 5% padding if auto
+    // Y-axis: use manual limits if provided, otherwise Shiny defaults
+    double minY = yMin ?? 0;
+    double maxY;
+    if (yMax != null) {
+      maxY = yMax!;
+    } else {
+      // Match Shiny's default Y-axis limits
+      if (plotType == 'CV') {
+        maxY = 0.5;
+      } else if (plotType == 'SNR') {
+        maxY = 20;
+      } else {
+        // SD: 0.25 * max(mean)
+        final maxMean = points.map((p) => p.point.mean).reduce((a, b) => a > b ? a : b);
+        maxY = 0.25 * maxMean;
+      }
+    }
+
+    // Add 5% padding to X if auto
     if (xMin == null || xMax == null) {
       final xPadding = (maxX - minX) * 0.05;
       minX -= xPadding;
       maxX += xPadding;
     }
 
-    if (yMin == null || yMax == null) {
-      final yPadding = (maxY - minY) * 0.05;
-      minY -= yPadding;
-      maxY += yPadding;
-    }
-
-    // Ensure non-negative Y for CV/SNR/SD
+    // Ensure non-negative Y
     if (minY < 0) minY = 0;
 
     // Ensure valid range
@@ -144,7 +155,7 @@ class MeanVarianceChartPainter extends CustomPainter {
       maxX = maxX + 0.5;
     }
     if (minY >= maxY) {
-      minY = minY - 0.5;
+      minY = 0;
       maxY = maxY + 0.5;
     }
 
@@ -195,17 +206,10 @@ class MeanVarianceChartPainter extends CustomPainter {
       final canvasX = size.width * xNorm;
       final canvasY = size.height * (1 - yNorm); // Flip Y
 
-      // Draw shape based on classification
-      if (showFit) {
-        if (point.bLow) {
-          _drawTriangle(canvas, Offset(canvasX, canvasY), 4.5, pointColor);
-        } else if (point.bHigh) {
-          _drawSquare(canvas, Offset(canvasX, canvasY), 4.0, pointColor);
-        } else {
-          _drawCircle(canvas, Offset(canvasX, canvasY), 2.5, pointColor);
-        }
+      // Draw shape based on bHigh classification (matches Shiny: shape = bHigh)
+      if (showFit && point.bHigh) {
+        _drawTriangle(canvas, Offset(canvasX, canvasY), 3.5, pointColor);
       } else {
-        // All circles when fit disabled
         _drawCircle(canvas, Offset(canvasX, canvasY), 2.5, pointColor);
       }
     }

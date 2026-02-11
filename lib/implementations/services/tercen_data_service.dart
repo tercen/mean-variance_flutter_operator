@@ -206,14 +206,13 @@ class TercenDataService {
         debugPrint('  Label map: $ciLabelMap');
 
         // Map each data point's .ci to group and supergroup labels
-        // Shiny uses interaction(colors) → "Group.Supergroup" order
-        // If 2+ factors: first factors = group (test condition), last = supergroup
-        // If 1 factor: that's the group, supergroup is 'Default'
+        // First factor = supergroup (grid rows), remaining = group (grid columns)
+        // paneKey format is "$group.$supergroup" to match Shiny's interaction() order
         if (factorNames.length >= 2) {
-          final sgFactor = factorNames.last;
-          final grpFactors = factorNames.sublist(0, factorNames.length - 1);
-          debugPrint('  Group factors: $grpFactors');
+          final sgFactor = factorNames[0];
+          final grpFactors = factorNames.sublist(1);
           debugPrint('  Supergroup factor: $sgFactor');
+          debugPrint('  Group factors: $grpFactors');
 
           supergroupValues = List.generate(yVals.length, (i) {
             final ci = _toInt(ciVals[i]);

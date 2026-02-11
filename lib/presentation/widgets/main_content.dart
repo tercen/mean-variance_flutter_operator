@@ -24,6 +24,7 @@ class MainContent extends StatefulWidget {
   final double? yMax;
   final double lowThreshold;
   final double highThreshold;
+  final GlobalKey? repaintBoundaryKey;
 
   const MainContent({
     super.key,
@@ -38,6 +39,7 @@ class MainContent extends StatefulWidget {
     this.yMax,
     this.lowThreshold = 100.0,
     this.highThreshold = 1000.0,
+    this.repaintBoundaryKey,
   });
 
   @override
@@ -180,9 +182,11 @@ class _MainContentState extends State<MainContent> {
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(AppSpacing.md),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+            child: RepaintBoundary(
+              key: widget.repaintBoundaryKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
                 // Chart Title (if provided)
                 if (widget.chartTitle.isNotEmpty) ...[
                   Center(
@@ -216,7 +220,8 @@ class _MainContentState extends State<MainContent> {
                   const SizedBox(height: AppSpacing.md),
                   _buildTableBelow(context, dataset),
                 ],
-              ],
+                ],
+              ),
             ),
           );
         },

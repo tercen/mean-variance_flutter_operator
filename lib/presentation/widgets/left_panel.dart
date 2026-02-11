@@ -51,6 +51,8 @@ class LeftPanel extends StatefulWidget {
   final ValueChanged<int> onExportWidthChanged;
   final int exportHeight;
   final ValueChanged<int> onExportHeightChanged;
+  final VoidCallback? onExportPng;
+  final VoidCallback? onExportPdf;
 
   // Panel state
   final bool isCollapsed;
@@ -92,6 +94,8 @@ class LeftPanel extends StatefulWidget {
     required this.onExportWidthChanged,
     required this.exportHeight,
     required this.onExportHeightChanged,
+    this.onExportPng,
+    this.onExportPdf,
     required this.isCollapsed,
     required this.onToggleCollapse,
   });
@@ -550,9 +554,9 @@ class _LeftPanelState extends State<LeftPanel> {
       icon: Icons.download,
       label: 'EXPORT',
       children: [
-        _buildExportButton(context, 'Export as PDF', Icons.picture_as_pdf, () {}),
+        _buildExportButton(context, 'Export as PDF', Icons.picture_as_pdf, widget.onExportPdf ?? () {}),
         const SizedBox(height: AppSpacing.sm),
-        _buildExportButton(context, 'Export as PNG', Icons.image, () {}),
+        _buildExportButton(context, 'Export as PNG', Icons.image, widget.onExportPng ?? () {}),
         const SizedBox(height: AppSpacing.md),
         Text(
           'Image size (px)',

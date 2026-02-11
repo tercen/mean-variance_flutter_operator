@@ -29,6 +29,9 @@ dependencies:
   # Export functionality
   pdf: ^3.10.8
 
+  # Web APIs (WASM-compatible, for file download triggers)
+  web: 0.5.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

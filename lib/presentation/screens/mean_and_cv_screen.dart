@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import '../widgets/left_panel.dart';
 import '../widgets/main_content.dart';
 import '../widgets/top_bar.dart';
 import '../../core/utils/context_detector.dart';
+import '../../implementations/services/export_service.dart';
 
 /// Main screen for Mean-Variance operator
 /// Following Tercen app-frame.md pattern
@@ -16,7 +18,10 @@ class MeanAndCvScreen extends StatefulWidget {
 class _MeanAndCvScreenState extends State<MeanAndCvScreen> {
   bool _isPanelCollapsed = false;
 
-  // Mock state for controls
+  // RepaintBoundary key for export capture
+  final _repaintBoundaryKey = GlobalKey();
+
+  // Control state
   String _chartTitle = '';
   String _plotType = 'CV';
   bool _showModelFit = true;
@@ -39,6 +44,20 @@ class _MeanAndCvScreenState extends State<MeanAndCvScreen> {
     setState(() {
       _isPanelCollapsed = !_isPanelCollapsed;
     });
+  }
+
+  Future<void> _exportPng() async {
+    final boundary = _repaintBoundaryKey.currentContext?.findRenderObject()
+        as RenderRepaintBoundary?;
+    if (boundary == null) return;
+    await ExportService.exportPng(boundary, _exportWidth);
+  }
+
+  Future<void> _exportPdf() async {
+    final boundary = _repaintBoundaryKey.currentContext?.findRenderObject()
+        as RenderRepaintBoundary?;
+    if (boundary == null) return;
+    await ExportService.exportPdf(boundary, _exportWidth);
   }
 
   @override
@@ -84,6 +103,8 @@ class _MeanAndCvScreenState extends State<MeanAndCvScreen> {
             onExportWidthChanged: (value) => setState(() => _exportWidth = value),
             exportHeight: _exportHeight,
             onExportHeightChanged: (value) => setState(() => _exportHeight = value),
+            onExportPng: _exportPng,
+            onExportPdf: _exportPdf,
             isCollapsed: _isPanelCollapsed,
             onToggleCollapse: _togglePanelCollapse,
           ),
@@ -109,6 +130,7 @@ class _MeanAndCvScreenState extends State<MeanAndCvScreen> {
                     yMax: _yMaxAuto ? null : _yMax,
                     lowThreshold: _lowSignalThreshold,
                     highThreshold: _highSignalThreshold,
+                    repaintBoundaryKey: _repaintBoundaryKey,
                   ),
                 ),
               ],

@@ -33,7 +33,12 @@ class _CompactNumberFieldState extends State<CompactNumberField> {
   void didUpdateWidget(CompactNumberField oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.value != widget.value) {
-      _controller.text = widget.value?.toString() ?? '';
+      // Only update text if current text doesn't already represent the new value.
+      // This prevents "4" being replaced by "4.0" while the user is still typing "40".
+      final currentParsed = double.tryParse(_controller.text);
+      if (currentParsed != widget.value) {
+        _controller.text = widget.value?.toString() ?? '';
+      }
     }
   }
 
